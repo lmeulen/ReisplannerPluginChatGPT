@@ -92,6 +92,7 @@ describe('Nederlandse Treinreisplanner MCP Worker', () => {
       'get_planned_journey_details',
       'check_route_disruptions',
       'check_journey_status',
+      'check_journey_status_ref',
       'find_departure_platform',
       'check_planned_journey_warnings',
       'resolve_station',
@@ -103,6 +104,75 @@ describe('Nederlandse Treinreisplanner MCP Worker', () => {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       outputSchema: { properties: { fromStation: { type: 'object' }, toStation: { type: 'object' }, journeys: { type: 'array' } } }
     });
+  });
+
+  it('reports delay and platform changes from a ctxRecon reference', async () => {
+    mockNsResponse({
+      ctxRecon: 'ctx-status-1',
+      plannedDurationInMinutes: 30,
+      transfers: 0,
+      status: 'NORMAL',
+      legs: [
+        {
+          name: 'Intercity',
+          direction: 'Utrecht Centraal',
+          origin: {
+            name: 'Amsterdam Centraal',
+            plannedDateTime: '2026-09-11T08:24:00+02:00',
+            actualDateTime: '2026-09-11T08:29:00+02:00',
+            plannedTrack: '5',
+            actualTrack: '7'
+          },
+          destination: {
+            name: 'Utrecht Centraal',
+            plannedDateTime: '2026-09-11T08:54:00+02:00',
+            actualDateTime: '2026-09-11T08:59:00+02:00'
+          },
+          product: { categoryName: 'Intercity' }
+        }
+      ]
+    });
+
+    const response = await callMcpTool('check_journey_status_ref', { ctxRecon: 'ctx-status-1' }, 'status-1');
+
+    expect(response.status).toBe(200);
+    await expect(readMcpResponse(response)).resolves.toMatchObject({
+      id: 'status-1',
+      result: {
+        structuredContent: {
+          reference: { type: 'ctxRecon', value: 'ctx-status-1' },
+          status: 'delayed',
+          delayMinutes: 5,
+          platformChanged: true,
+          missedTransfer: false,
+          legs: [{ status: 'delayed', actualPlatform: '7', platformChanged: true }]
+        }
+      }
+    });
+  });
+
+  it('marks a short connection as at risk', async () => {
+    mockNsResponse({
+      ctxRecon: 'ctx-risk-1',
+      status: 'NORMAL',
+      legs: [
+        {
+          origin: { name: 'Amsterdam Centraal', plannedDateTime: '2026-09-11T08:24:00+02:00' },
+          destination: { name: 'Utrecht Centraal', plannedDateTime: '2026-09-11T08:51:00+02:00' },
+          product: { categoryName: 'Intercity' }
+        },
+        {
+          origin: { name: 'Utrecht Centraal', plannedDateTime: '2026-09-11T08:54:00+02:00' },
+          destination: { name: 'Eindhoven Centraal', plannedDateTime: '2026-09-11T09:35:00+02:00' },
+          product: { categoryName: 'Intercity' }
+        }
+      ]
+    });
+
+    const response = await callMcpTool('check_journey_status_ref', { ctxRecon: 'ctx-risk-1' }, 'status-risk-1');
+
+    expect(response.status).toBe(200);
+    await expect(readMcpResponse(response)).resolves.toMatchObject({ result: { structuredContent: { status: 'at_risk' } } });
   });
 
   it('recommends the fastest resolved journey and returns alternatives', async () => {

@@ -50,6 +50,7 @@ Deze API-nabije tools blijven in de code beschikbaar voor interne compositie en 
 | `get_planned_journey_details` | Plan een reis en haal details van de beste optie op. |
 | `check_route_disruptions` | Controleer routewaarschuwingen en stationverstoringen. |
 | `check_journey_status` | Controleer reisstatus en waarschuwingen. |
+| `check_journey_status_ref` | Controleer een eerder geplande reis met `ctxRecon` of een enkele treinrit met `journeyDetailRef`. |
 | `find_departure_platform` | Vind vertrekspoor vanaf station richting bestemming. |
 | `check_planned_journey_warnings` | Verzamel waarschuwingen voor een geplande reis. |
 | `resolve_station` | Vind de beste stationmatch voor naam, afkorting, code of typfout. |
@@ -87,6 +88,8 @@ Workflowtools geven daarnaast een vaste tekstuele presentatie terug in `content`
 | Welke reis raad je aan van Amsterdam Centraal naar Eindhoven als ik vooral snel wil aankomen? | `recommend_journey` |
 | Welke reis heeft de minste overstappen van Rotterdam naar Groningen? | `recommend_journey` |
 | Geef een betrouwbare reisoptie van Utrecht naar Schiphol met actuele waarschuwingen. | `recommend_journey` |
+| Is mijn eerder geplande reis nog haalbaar? | `check_journey_status_ref` met `ctxRecon` |
+| Heeft de trein van mijn reis vertraging of een ander spoor? | `check_journey_status_ref` met `journeyDetailRef` |
 
 ## Lokale setup
 

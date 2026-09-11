@@ -10,7 +10,9 @@ import type {
   DomesticPriceResult,
   Env,
   JourneyDetailsResult,
+  JourneyLeg,
   JourneyOption,
+  JourneyStopResult,
   Language,
   StationArrivalResult,
   StationDepartureResult,
@@ -229,6 +231,35 @@ const warningOutputSchema = z.object({
 const journeyAlternativeOutputSchema = z.object({
   journey: journeyOutputSchema,
   reason: z.string()
+});
+
+const journeyStatusLegOutputSchema = z.object({
+  origin: z.string(),
+  destination: z.string(),
+  status: z.enum(['on_track', 'delayed', 'at_risk', 'missed', 'cancelled', 'unknown']),
+  plannedDeparture: z.string().nullable(),
+  actualDeparture: z.string().nullable(),
+  plannedArrival: z.string().nullable(),
+  actualArrival: z.string().nullable(),
+  delayMinutes: z.number().nullable(),
+  plannedPlatform: z.string().nullable(),
+  actualPlatform: z.string().nullable(),
+  platformChanged: z.boolean(),
+  cancelled: z.boolean()
+});
+
+const journeyStatusOutputSchema = z.object({
+  reference: z.object({ type: z.enum(['ctxRecon', 'journeyDetailRef']), value: z.string() }),
+  status: z.enum(['on_track', 'delayed', 'at_risk', 'missed', 'cancelled', 'unknown']),
+  journey: journeyOutputSchema.nullable(),
+  journeyDetails: journeyDetailsOutputSchema.nullable(),
+  legs: z.array(journeyStatusLegOutputSchema),
+  missedTransfer: z.boolean(),
+  platformChanged: z.boolean(),
+  delayMinutes: z.number().nullable(),
+  bestAlternative: journeyOutputSchema.nullable(),
+  warnings: z.array(warningOutputSchema),
+  retrievedAt: z.string()
 });
 
 export async function handleMcpRequest(context: AppContext, exposeApiNearTools = false): Promise<Response> {
@@ -668,6 +699,21 @@ function createMcpServer(env: Env, exposeApiNearTools: boolean): McpServer {
   );
 
   server.registerTool(
+    'check_journey_status_ref',
+    {
+      title: 'Check journey status by reference',
+      description: 'Controleer een eerder geplande reis met ctxRecon of een enkele treinrit met journeyDetailRef. Geeft vertraging, spoorwijzigingen, gemiste overstappen en zo nodig een alternatief.',
+      inputSchema: journeyStatusReferenceInputSchema(),
+      outputSchema: journeyStatusOutputSchema,
+      annotations: readOnlyOpenWorldAnnotations
+    },
+    async (input) => {
+      const result = await observeToolCall(env, 'check_journey_status_ref', input, async () => checkJourneyStatusByReference(env, input));
+      return { structuredContent: result, content: [{ type: 'text', text: formatJourneyStatus(result) }] };
+    }
+  );
+
+  server.registerTool(
     'find_departure_platform',
     {
       title: 'Find departure platform',
@@ -812,6 +858,15 @@ function recommendJourneyInputSchema() {
     ...resolvedJourneyInputSchema(),
     priority: z.enum(['balanced', 'fastest', 'fewest_transfers', 'reliable']).default('balanced'),
     maxAlternatives: z.number().int().min(0).max(2).default(2)
+  };
+}
+
+function journeyStatusReferenceInputSchema() {
+  return {
+    ctxRecon: z.string().trim().min(2).max(4096).optional().describe('Referentie van een volledige geplande reis.'),
+    journeyDetailRef: z.string().trim().min(2).max(4096).optional().describe('Referentie van een enkele treinrit.'),
+    dateTime: z.string().datetime({ offset: true }).optional(),
+    language: z.enum(['nl', 'en']).default('nl')
   };
 }
 
@@ -1041,6 +1096,203 @@ async function checkRouteDisruptions(env: Env, input: ResolvedJourneyInput) {
 async function checkJourneyStatus(env: Env, input: ResolvedJourneyInput) {
   const resolved = await planResolvedJourney(env, input);
   return { ...resolved, warnings: collectJourneyWarnings(resolved.journeys) };
+}
+
+type JourneyStatusReferenceInput = {
+  ctxRecon?: string;
+  journeyDetailRef?: string;
+  dateTime?: string;
+  language: Language;
+};
+
+type JourneyStatusValue = 'on_track' | 'delayed' | 'at_risk' | 'missed' | 'cancelled' | 'unknown';
+
+async function checkJourneyStatusByReference(env: Env, input: JourneyStatusReferenceInput) {
+  if (Boolean(input.ctxRecon) === Boolean(input.journeyDetailRef)) {
+    throw new Error('Provide exactly one of ctxRecon or journeyDetailRef.');
+  }
+  const referenceType = input.ctxRecon ? 'ctxRecon' : 'journeyDetailRef';
+  const referenceValue = input.ctxRecon ?? input.journeyDetailRef;
+  if (!referenceValue) throw new Error('ctxRecon or journeyDetailRef is required.');
+
+  if (input.ctxRecon) {
+    const journeys = await getCachedSingleTrip(env, { ctxRecon: input.ctxRecon, date: input.dateTime, language: input.language });
+    const journey = journeys[0] ?? null;
+    if (!journey) {
+      return createJourneyStatusResult(referenceType, referenceValue, null, null, [], null, []);
+    }
+
+    const status = buildJourneyStatus(journey);
+    const warnings = collectJourneyWarnings([journey]);
+    const bestAlternative = await findJourneyAlternative(env, journey, status.status, input.language);
+    return createJourneyStatusResult(referenceType, referenceValue, journey, null, status.legs, bestAlternative, warnings, status);
+  }
+
+  const journeyDetails = await getCachedJourneyDetails(env, {
+    journeyDetailRef: input.journeyDetailRef,
+    dateTime: input.dateTime,
+    omitCrowdForecast: false,
+    language: input.language
+  });
+  const status = buildDetailStatus(journeyDetails);
+  const warnings = journeyDetails.notes.map((message) => ({ source: referenceValue, message }));
+  return createJourneyStatusResult(referenceType, referenceValue, null, journeyDetails, status.legs, null, warnings, status);
+}
+
+function createJourneyStatusResult(
+  referenceType: 'ctxRecon' | 'journeyDetailRef',
+  referenceValue: string,
+  journey: JourneyOption | null,
+  journeyDetails: JourneyDetailsResult | null,
+  legs: JourneyStatusLeg[],
+  bestAlternative: JourneyOption | null,
+  warnings: Array<{ source: string; message: string }>,
+  status = summarizeStatus(legs)
+) {
+  return {
+    reference: { type: referenceType, value: referenceValue },
+    status: status.status,
+    journey,
+    journeyDetails,
+    legs,
+    missedTransfer: status.missedTransfer,
+    platformChanged: status.platformChanged,
+    delayMinutes: status.delayMinutes,
+    bestAlternative,
+    warnings,
+    retrievedAt: new Date().toISOString()
+  };
+}
+
+type JourneyStatusLeg = {
+  origin: string;
+  destination: string;
+  status: JourneyStatusValue;
+  plannedDeparture: string | null;
+  actualDeparture: string | null;
+  plannedArrival: string | null;
+  actualArrival: string | null;
+  delayMinutes: number | null;
+  plannedPlatform: string | null;
+  actualPlatform: string | null;
+  platformChanged: boolean;
+  cancelled: boolean;
+};
+
+function buildJourneyStatus(journey: JourneyOption): { legs: JourneyStatusLeg[]; status: JourneyStatusValue; missedTransfer: boolean; platformChanged: boolean; delayMinutes: number | null } {
+  const legs = journey.legs.map((leg) => ({
+    origin: leg.origin,
+    destination: leg.destination,
+    status: statusForLeg(leg),
+    plannedDeparture: leg.plannedDeparture,
+    actualDeparture: leg.actualDeparture,
+    plannedArrival: leg.plannedArrival,
+    actualArrival: leg.actualArrival,
+    delayMinutes: maxDelayMinutes(leg.plannedDeparture, leg.actualDeparture, leg.plannedArrival, leg.actualArrival),
+    plannedPlatform: leg.plannedPlatform,
+    actualPlatform: leg.actualPlatform,
+    platformChanged: Boolean(leg.plannedPlatform && leg.actualPlatform && leg.plannedPlatform !== leg.actualPlatform),
+    cancelled: leg.cancelled
+  }));
+  const transferStatuses = journey.legs.slice(0, -1).map((leg, index) => transferStatus(leg, journey.legs[index + 1]));
+  const mergedLegs = legs.map((leg, index) => ({
+    ...leg,
+    status:
+      transferStatuses[index] === 'missed'
+        ? 'missed'
+        : transferStatuses[index] === 'at_risk' && leg.status === 'on_track'
+          ? 'at_risk'
+          : leg.status
+  }));
+  return { ...summarizeStatus(mergedLegs), legs: mergedLegs };
+}
+
+function buildDetailStatus(details: JourneyDetailsResult): { legs: JourneyStatusLeg[]; status: JourneyStatusValue; missedTransfer: boolean; platformChanged: boolean; delayMinutes: number | null } {
+  const legs = details.stops.map((stop) => ({
+    origin: stop.name,
+    destination: stop.name,
+    status: statusForStop(stop),
+    plannedDeparture: stop.plannedDeparture,
+    actualDeparture: stop.actualDeparture,
+    plannedArrival: stop.plannedArrival,
+    actualArrival: stop.actualArrival,
+    delayMinutes: maxDelayMinutes(stop.plannedDeparture, stop.actualDeparture, stop.plannedArrival, stop.actualArrival),
+    plannedPlatform: stop.plannedPlatform,
+    actualPlatform: stop.actualPlatform,
+    platformChanged: Boolean(stop.plannedPlatform && stop.actualPlatform && stop.plannedPlatform !== stop.actualPlatform),
+    cancelled: stop.cancelled
+  }));
+  return { ...summarizeStatus(legs), legs };
+}
+
+function summarizeStatus(legs: JourneyStatusLeg[]): { status: JourneyStatusValue; missedTransfer: boolean; platformChanged: boolean; delayMinutes: number | null } {
+  const missedTransfer = legs.some((leg) => leg.status === 'missed');
+  const cancelled = legs.some((leg) => leg.cancelled);
+  const delayed = legs.some((leg) => leg.status === 'delayed');
+  const atRisk = legs.some((leg) => leg.status === 'at_risk');
+  const delayMinutes = legs.reduce<number | null>((maximum, leg) => leg.delayMinutes === null ? maximum : Math.max(maximum ?? 0, leg.delayMinutes), null);
+  return {
+    status: missedTransfer ? 'missed' : cancelled ? 'cancelled' : delayed ? 'delayed' : atRisk ? 'at_risk' : legs.length === 0 ? 'unknown' : 'on_track',
+    missedTransfer,
+    platformChanged: legs.some((leg) => leg.platformChanged),
+    delayMinutes
+  };
+}
+
+function statusForLeg(leg: JourneyLeg): JourneyStatusValue {
+  if (leg.cancelled) return 'cancelled';
+  const delay = maxDelayMinutes(leg.plannedDeparture, leg.actualDeparture, leg.plannedArrival, leg.actualArrival);
+  if (delay !== null && delay > 0) return 'delayed';
+  if (!leg.plannedDeparture && !leg.actualDeparture && !leg.plannedArrival && !leg.actualArrival) return 'unknown';
+  return 'on_track';
+}
+
+function statusForStop(stop: JourneyStopResult): JourneyStatusValue {
+  if (stop.cancelled || stop.status?.toLocaleLowerCase('nl-NL').includes('cancel')) return 'cancelled';
+  const delay = maxDelayMinutes(stop.plannedDeparture, stop.actualDeparture, stop.plannedArrival, stop.actualArrival);
+  if (delay !== null && delay > 0) return 'delayed';
+  if (!stop.plannedDeparture && !stop.actualDeparture && !stop.plannedArrival && !stop.actualArrival) return 'unknown';
+  return 'on_track';
+}
+
+function transferStatus(previous: JourneyLeg, next: JourneyLeg): JourneyStatusValue {
+  const arrival = previous.actualArrival ?? previous.plannedArrival;
+  const departure = next.actualDeparture ?? next.plannedDeparture;
+  if (!arrival || !departure) return 'unknown';
+  const transferMinutes = (Date.parse(departure) - Date.parse(arrival)) / 60_000;
+  if (!Number.isFinite(transferMinutes)) return 'unknown';
+  if (transferMinutes <= 0) return 'missed';
+  if (transferMinutes < 5) return 'at_risk';
+  return 'on_track';
+}
+
+function maxDelayMinutes(...pairs: Array<string | null>): number | null {
+  const delays: number[] = [];
+  for (let index = 0; index < pairs.length; index += 2) {
+    const planned = pairs[index];
+    const actual = pairs[index + 1];
+    if (planned && actual) {
+      const delay = (Date.parse(actual) - Date.parse(planned)) / 60_000;
+      if (Number.isFinite(delay)) delays.push(Math.max(0, Math.round(delay)));
+    }
+  }
+  return delays.length > 0 ? Math.max(...delays) : null;
+}
+
+async function findJourneyAlternative(env: Env, journey: JourneyOption, status: JourneyStatusValue, language: Language): Promise<JourneyOption | null> {
+  if (!['missed', 'cancelled'].includes(status) || journey.legs.length === 0) return null;
+  const firstLeg = journey.legs[0];
+  const lastLeg = journey.legs[journey.legs.length - 1];
+  if (!firstLeg.origin || !lastLeg.destination) return null;
+  const alternatives = await planResolvedJourney(env, {
+    from: firstLeg.origin,
+    to: lastLeg.destination,
+    dateTime: new Date().toISOString(),
+    searchForArrival: false,
+    accessible: false,
+    language
+  });
+  return alternatives.journeys.find((candidate) => candidate.id !== journey.id && candidate.summary.status === 'NORMAL') ?? alternatives.journeys[0] ?? null;
 }
 
 async function findDeparturePlatform(env: Env, input: { station: string; destination: string; dateTime?: string; maxResults: number; language: Language }) {
@@ -1482,6 +1734,24 @@ function summarizeJourneyStatus(journeys: JourneyOption[], warnings: Array<{ sou
   if (journeys.length === 0) return 'Geen reis gevonden om de status voor te controleren.';
   if (warnings.length === 0) return `Reisstatus: ${journeys[0].summary.status}. Geen extra waarschuwingen in de response.`;
   return `Reisstatus: ${journeys[0].summary.status}. ${warnings.length} waarschuwing(en) gevonden.`;
+}
+
+function formatJourneyStatus(result: {
+  reference: { type: 'ctxRecon' | 'journeyDetailRef'; value: string };
+  status: JourneyStatusValue;
+  delayMinutes: number | null;
+  missedTransfer: boolean;
+  platformChanged: boolean;
+  bestAlternative: JourneyOption | null;
+  warnings: Array<{ source: string; message: string }>;
+}): string {
+  const delay = result.delayMinutes === null ? 'geen actuele vertraging vastgesteld' : `${result.delayMinutes} minuten vertraging`;
+  const lines = [`Reisstatus (${result.reference.type}): ${result.status}. ${delay}.`];
+  if (result.platformChanged) lines.push('Er is een spoorwijziging vastgesteld.');
+  if (result.missedTransfer) lines.push('Een overstap lijkt niet meer haalbaar.');
+  if (result.bestAlternative) lines.push(`Alternatief beschikbaar: vertrek ${result.bestAlternative.summary.departure ?? 'onbekend'}, aankomst ${result.bestAlternative.summary.arrival ?? 'onbekend'}.`);
+  if (result.warnings.length > 0) lines.push(`${result.warnings.length} waarschuwing(en) gevonden.`);
+  return lines.join(' ');
 }
 
 function summarizeDeparturePlatform(departures: StationDepartureResult[]): string {

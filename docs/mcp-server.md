@@ -64,6 +64,7 @@ Deze API-nabije tools blijven intern beschikbaar voor compositie en hergebruik, 
 | `get_planned_journey_details` | Plan een reis en haal details van de beste optie op. |
 | `check_route_disruptions` | Controleer routewaarschuwingen en stationverstoringen. |
 | `check_journey_status` | Controleer reisstatus en waarschuwingen. |
+| `check_journey_status_ref` | Controleer een eerder geplande reis met `ctxRecon` of een enkele treinrit met `journeyDetailRef`. |
 | `find_departure_platform` | Vind vertrekspoor vanaf station richting bestemming. |
 | `check_planned_journey_warnings` | Verzamel waarschuwingen voor een geplande reis. |
 | `resolve_station` | Vind de beste stationmatch voor naam, afkorting, code of typfout. |
@@ -79,6 +80,8 @@ Workflowtools gebruiken dezelfde resolver intern. Daardoor kunnen chatvragen zoa
 Workflowtools sturen de presentatie extra aan via hun toolbeschrijving, serverinstructies en `content`. De teruggegeven tekst gebruikt een vaste volgorde voor treinreis, tijden, duur, overstappen, treinlegs, sporen en tussenstops. Buslegs worden uit deze tekstuele presentatie weggelaten. Dit is een sterke clienthint, geen garantie op een identieke visuele rendering: de MCP-client bepaalt zelf de uiteindelijke UI.
 
 `recommend_journey` rangschikt actuele reisopties met `priority`: `balanced`, `fastest`, `fewest_transfers` of `reliable`. De tool geeft één aanbeveling, maximaal twee alternatieven en relevante waarschuwingen terug. De ranking gebruikt alleen reistijd, overstappen, status, annuleringen en waarschuwingen uit de NS-response; er worden geen actuele reisgegevens afgeleid of verzonnen.
+
+`check_journey_status_ref` accepteert precies één referentie. Gebruik `ctxRecon` voor de volledige eerder geplande reis en `journeyDetailRef` voor één treinleg. De tool rapporteert actuele vertraging, spoorwijzigingen en gemiste of risicovolle overstappen. Bij een volledige reis met een niet-haalbare status wordt, wanneer de NS-response voldoende routegegevens bevat, ook een actueel alternatief opgehaald.
 
 Elke tool publiceert metadata voor ChatGPT tool scanning:
 
