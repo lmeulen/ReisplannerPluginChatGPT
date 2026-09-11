@@ -145,7 +145,7 @@ $body = @{
   jsonrpc = '2.0'
   id = 1
   method = 'initialize'
-  params = @{ protocolVersion = '2025-06-18'; clientInfo = @{ name = 'manual-test'; version = '0.1.0' } }
+  params = @{ protocolVersion = '2025-06-18'; clientInfo = @{ name = 'manual-test'; version = '1.0.0' } }
 } | ConvertTo-Json -Depth 8
 
 Invoke-RestMethod -Method Post -Uri 'http://localhost:8787/mcp' -Headers $headers -Body $body

@@ -240,7 +240,7 @@ export async function handleMcpRequest(context: AppContext, exposeApiNearTools =
 
 function createMcpServer(env: Env, exposeApiNearTools: boolean): McpServer {
   const server = new McpServer(
-    { name: 'nederlandse-treinreisplanner-mcp', version: '0.3.0' },
+    { name: 'nederlandse-treinreisplanner-mcp', version: '1.0.0' },
     {
       instructions:
         `Gebruik deze server voor actuele Nederlandse treinreisinformatie. Alle tools zijn read-only. Verzin nooit tijden, routes, perrons, prijzen of verstoringen die niet in de tool-output staan. ${workflowPresentationInstructions}`
