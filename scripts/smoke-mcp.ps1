@@ -34,6 +34,44 @@ function Get-McpPayload {
   return $body | ConvertFrom-Json
 }
 
+function Invoke-Request {
+  param(
+    [Parameter(Mandatory = $true)][string]$Uri,
+    [Parameter(Mandatory = $true)][ValidateSet('Get', 'Post')][string]$Method,
+    [hashtable]$Headers = @{},
+    [string]$ContentType,
+    [string]$Body
+  )
+
+  try {
+    $requestParameters = @{
+      Uri = $Uri
+      Method = $Method
+      Headers = $Headers
+      UseBasicParsing = $true
+    }
+    if ($ContentType) { $requestParameters.ContentType = $ContentType }
+    if ($Body) { $requestParameters.Body = $Body }
+    return Invoke-WebRequest @requestParameters
+  } catch {
+    $errorResponse = $_.Exception.Response
+    if (-not $errorResponse) { throw }
+
+    $reader = New-Object System.IO.StreamReader($errorResponse.GetResponseStream())
+    try {
+      $content = $reader.ReadToEnd()
+    } finally {
+      $reader.Dispose()
+    }
+
+    return [pscustomobject]@{
+      StatusCode = [int]$errorResponse.StatusCode
+      Headers = $errorResponse.Headers
+      Content = $content
+    }
+  }
+}
+
 function Invoke-McpRpc {
   param(
     [Parameter(Mandatory = $true)]$Body,
@@ -48,7 +86,7 @@ function Invoke-McpRpc {
     $requestHeaders[$key] = $Headers[$key]
   }
 
-  $response = Invoke-WebRequest -Uri $mcpUrl -Method Post -Headers $requestHeaders -ContentType 'application/json' -Body ($Body | ConvertTo-Json -Depth 20) -UseBasicParsing -SkipHttpErrorCheck
+  $response = Invoke-Request -Uri $mcpUrl -Method Post -Headers $requestHeaders -ContentType 'application/json' -Body ($Body | ConvertTo-Json -Depth 20)
   $payload = Get-McpPayload $response
   return [pscustomobject]@{ StatusCode = [int]$response.StatusCode; Payload = $payload }
 }
@@ -60,7 +98,7 @@ function Assert-HttpSuccess {
   }
 }
 
-$health = Invoke-WebRequest -Uri "$baseUrl/health" -Method Get -UseBasicParsing -SkipHttpErrorCheck
+$health = Invoke-Request -Uri "$baseUrl/health" -Method Get
 if ($health.StatusCode -ne 200) {
   throw "/health failed with HTTP $($health.StatusCode)."
 }
