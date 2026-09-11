@@ -1,0 +1,34 @@
+name = "nederlandse-treinreisplanner"
+main = "src/index.ts"
+compatibility_date = "2026-09-09"
+
+[vars]
+NS_API_BASE_URL = "https://gateway.apiportal.ns.nl/reisinformatie-api/api"
+RESPONSE_MODE = "strict"
+LOG_LEVEL = "info"
+MCP_RATE_LIMIT_PER_MINUTE = "45"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+
+[[durable_objects.bindings]]
+name = "MCP_RATE_LIMITER"
+class_name = "McpRateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["McpRateLimiter"]
+
+# Set secrets with:
+# wrangler secret put NS_API_KEY
+#
+# For public production traffic, add a Cloudflare WAF/rate limiting rule for /mcp.
