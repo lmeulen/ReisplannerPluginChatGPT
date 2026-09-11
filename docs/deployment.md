@@ -81,6 +81,14 @@ Na deployment gebruik je de publieke Worker-URL als remote MCP endpoint:
 https://<worker-url>/mcp
 ```
 
+Voer na deployment de MCP-smoke-test uit:
+
+```powershell
+npm run smoke:mcp -- -WorkerUrl 'https://<worker-url>' -StationCode ASD
+```
+
+De smoke-test controleert `/health`, MCP `initialize`, `ping`, `tools/list` en een `resolve_station`-call. Gebruik optioneel `-CheckRateLimit` om de rate-limitgrens te controleren. Dit verstuurt extra requests en is daarom alleen geschikt voor een gecontroleerde omgeving.
+
 ## Productiechecklist
 
 - Controleer dat `LOG_LEVEL` op `info` of lager staat.

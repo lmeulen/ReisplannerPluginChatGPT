@@ -22,6 +22,54 @@ describe('Nederlandse Treinreisplanner MCP Worker', () => {
     await expect(response.json()).resolves.toMatchObject({ status: 'ok', service: 'nederlandse-treinreisplanner-mcp' });
   });
 
+  it('publishes clean server instructions during MCP initialization', async () => {
+    const response = await createApp().request(
+      '/mcp',
+      mcpRequest({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test-client', version: '1.0.0' } }
+      },
+      { 'MCP-Protocol-Version': '2025-06-18' }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const result = await readMcpResponse(response);
+    expect(result.result.instructions).toContain('Verzin nooit tijden');
+    expect(result.result.instructions).not.toContain("' + '");
+    expect(result.result.instructions).not.toContain(' + ');
+  });
+
+  it('responds to MCP ping requests', async () => {
+    const response = await createApp().request('/mcp', mcpRequest({ jsonrpc: '2.0', id: 2, method: 'ping' }), env);
+
+    expect(response.status).toBe(200);
+    await expect(readMcpResponse(response)).resolves.toMatchObject({ jsonrpc: '2.0', id: 2, result: {} });
+  });
+
+  it('negotiates an unsupported initialization protocol version', async () => {
+    const response = await createApp().request(
+      '/mcp',
+      mcpRequest(
+        {
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'initialize',
+          params: { protocolVersion: '1999-01-01', capabilities: {}, clientInfo: { name: 'test-client', version: '1.0.0' } }
+        },
+        { 'MCP-Protocol-Version': '1999-01-01' }
+      ),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const result = await readMcpResponse(response);
+    expect(result).toMatchObject({ jsonrpc: '2.0', id: 3, result: { protocolVersion: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) } });
+    expect(result.result.protocolVersion).not.toBe('1999-01-01');
+  });
+
   it('does not expose legacy REST endpoints', async () => {
     const response = await createApp().request('/stations/search?query=Amsterdam', {}, env);
 

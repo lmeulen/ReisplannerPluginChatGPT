@@ -1,9 +1,9 @@
 {
   "name": "nederlandse-treinreisplanner-worker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker MCP-server die reizen plant via de NS Reisplanner API.",
+  "description": "MCP-server die reizen plant en reisinformatie geeft van NS",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "validate": "npm run typecheck && npm test",
+    "smoke:mcp": "powershell -ExecutionPolicy Bypass -File scripts/smoke-mcp.ps1",
     "mcp:inspect": "npx @modelcontextprotocol/inspector"
   },
   "dependencies": {

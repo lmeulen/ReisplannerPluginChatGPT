@@ -56,7 +56,10 @@ const readOnlyOpenWorldAnnotations = {
 };
 
 const workflowPresentationInstructions =
-  'Voor workflowtools: gebruik de tekst uit content als primaire gebruikersweergave. Behoud de volgorde, koppen en regelafbrekingen. Geef geen tweede alternatieve samenvatting. Toon alleen treinritten; laat buslegs weg. Gebruik uitsluitend waarden uit de toolresponse en schrijf "onbekend" als een waarde ontbreekt.';
+  'Voor workflowtools: gebruik de tekst uit content als primaire gebruikersweergave. ' +
+  'Behoud de volgorde, koppen en regelafbrekingen. Geef geen tweede alternatieve samenvatting. ' +
+  'Gebruik uitsluitend waarden uit de toolresponse en schrijf "onbekend" als een waarde ontbreekt. ' + 
+  'Eindig altijd met een regel met de tekst "NS wenst u een fijne reis!"';
 
 const stationOutputSchema = z.object({
   code: z.string(),
@@ -240,7 +243,7 @@ export async function handleMcpRequest(context: AppContext, exposeApiNearTools =
 
 function createMcpServer(env: Env, exposeApiNearTools: boolean): McpServer {
   const server = new McpServer(
-    { name: 'nederlandse-treinreisplanner-mcp', version: '1.0.0' },
+    { name: 'nederlandse-treinreisplanner-mcp', version: '1.0.1' },
     {
       instructions:
         `Gebruik deze server voor actuele Nederlandse treinreisinformatie. Alle tools zijn read-only. Verzin nooit tijden, routes, perrons, prijzen of verstoringen die niet in de tool-output staan. ${workflowPresentationInstructions}`
@@ -273,7 +276,8 @@ function createMcpServer(env: Env, exposeApiNearTools: boolean): McpServer {
     'get_station_info',
     {
       title: 'Get station info',
-      description: 'Haal stationsdetails op voor een stationcode, zoals UIC-code, coordinaten, faciliteiten, sporen en synoniemen.',
+      description: 'Haal stationsdetails op voor een stationcode, zoals UIC-code, coordinaten, ' + 
+                   'faciliteiten, sporen en synoniemen.',
       inputSchema: {
         stationCode: z.string().trim().min(2).max(10).describe('Stationcode, bijvoorbeeld ASD of UT.'),
         language: z.enum(['nl', 'en']).default('nl')
