@@ -226,6 +226,11 @@ const warningOutputSchema = z.object({
   message: z.string()
 });
 
+const journeyAlternativeOutputSchema = z.object({
+  journey: journeyOutputSchema,
+  reason: z.string()
+});
+
 export async function handleMcpRequest(context: AppContext, exposeApiNearTools = false): Promise<Response> {
   const rateLimit = await checkRateLimit(context);
   if (!rateLimit.allowed) {
@@ -243,7 +248,7 @@ export async function handleMcpRequest(context: AppContext, exposeApiNearTools =
 
 function createMcpServer(env: Env, exposeApiNearTools: boolean): McpServer {
   const server = new McpServer(
-    { name: 'nederlandse-treinreisplanner-mcp', version: '1.0.1' },
+    { name: 'nederlandse-treinreisplanner-mcp', version: '1.1.0' },
     {
       instructions:
         `Gebruik deze server voor actuele Nederlandse treinreisinformatie. Alle tools zijn read-only. Verzin nooit tijden, routes, perrons, prijzen of verstoringen die niet in de tool-output staan. ${workflowPresentationInstructions}`
@@ -529,6 +534,29 @@ function createMcpServer(env: Env, exposeApiNearTools: boolean): McpServer {
   );
 
   server.registerTool(
+    'recommend_journey',
+    {
+      title: 'Recommend journey',
+      description: 'Plan meerdere actuele reisopties, vergelijk reistijd, overstappen en waarschuwingen en geef een onderbouwde aanbeveling. Verzin nooit reisgegevens.',
+      inputSchema: recommendJourneyInputSchema(),
+      outputSchema: {
+        fromStation: resolvedStationOutputSchema,
+        toStation: resolvedStationOutputSchema,
+        recommendation: journeyOutputSchema.nullable(),
+        recommendationReason: z.string(),
+        alternatives: z.array(journeyAlternativeOutputSchema),
+        disruptions: z.array(disruptionOutputSchema),
+        warnings: z.array(warningOutputSchema)
+      },
+      annotations: readOnlyOpenWorldAnnotations
+    },
+    async (input) => {
+      const result = await observeToolCall(env, 'recommend_journey', input, async () => recommendJourney(env, input));
+      return { structuredContent: result, content: [{ type: 'text', text: formatJourneyRecommendation(result) }] };
+    }
+  );
+
+  server.registerTool(
     'get_resolved_station_departures',
     {
       title: 'Get resolved station departures',
@@ -779,6 +807,14 @@ function resolvedJourneyInputSchema() {
   };
 }
 
+function recommendJourneyInputSchema() {
+  return {
+    ...resolvedJourneyInputSchema(),
+    priority: z.enum(['balanced', 'fastest', 'fewest_transfers', 'reliable']).default('balanced'),
+    maxAlternatives: z.number().int().min(0).max(2).default(2)
+  };
+}
+
 function priceResolvedJourneyInputSchema() {
   return {
     ...resolvedJourneyInputSchema(),
@@ -863,6 +899,83 @@ async function planResolvedJourney(env: Env, input: ResolvedJourneyInput) {
   const toStation = await resolveStation(env, input.to, input.language);
   const journeys = await nsClient(env).planJourney(journeyInputFromResolved(input, requireResolvedStation(fromStation), requireResolvedStation(toStation)));
   return { fromStation, toStation, journeys };
+}
+
+type JourneyRecommendationInput = ResolvedJourneyInput & {
+  priority: 'balanced' | 'fastest' | 'fewest_transfers' | 'reliable';
+  maxAlternatives: number;
+};
+
+async function recommendJourney(env: Env, input: JourneyRecommendationInput) {
+  const resolved = await planResolvedJourney(env, input);
+  const stationDisruptions = await Promise.all([
+    getCachedStationDisruptions(env, { stationCode: requireResolvedStation(resolved.fromStation).code, language: input.language }),
+    getCachedStationDisruptions(env, { stationCode: requireResolvedStation(resolved.toStation).code, language: input.language })
+  ]);
+  const disruptions = dedupeDisruptions(stationDisruptions.flat());
+  const warnings = collectJourneyWarnings(resolved.journeys);
+  const rankedJourneys = [...resolved.journeys].sort((left, right) => compareJourneys(left, right, input.priority));
+  const recommendation = rankedJourneys[0] ?? null;
+  const alternatives = rankedJourneys.slice(1, input.maxAlternatives + 1).map((journey) => ({
+    journey,
+    reason: explainJourneyAlternative(journey, input.priority)
+  }));
+
+  return {
+    fromStation: resolved.fromStation,
+    toStation: resolved.toStation,
+    recommendation,
+    recommendationReason: recommendation ? explainJourneyRecommendation(recommendation, input.priority) : 'Geen actuele reisoptie gevonden.',
+    alternatives,
+    disruptions,
+    warnings
+  };
+}
+
+function compareJourneys(left: JourneyOption, right: JourneyOption, priority: JourneyRecommendationInput['priority']): number {
+  return scoreJourney(left, priority) - scoreJourney(right, priority);
+}
+
+function scoreJourney(journey: JourneyOption, priority: JourneyRecommendationInput['priority']): number {
+  const duration = journey.summary.durationMinutes ?? 10_000;
+  const transfers = journey.summary.transfers;
+  const warnings = journey.warnings.length;
+  const cancelledLegs = journey.legs.filter((leg) => leg.cancelled).length;
+  const statusPenalty = journey.summary.status === 'NORMAL' ? 0 : 10_000;
+  const cancellationPenalty = cancelledLegs * 20_000;
+  const warningPenalty = warnings * 500;
+
+  switch (priority) {
+    case 'fastest':
+      return duration * 100 + transfers * 10 + warningPenalty + statusPenalty + cancellationPenalty;
+    case 'fewest_transfers':
+      return transfers * 10_000 + duration + warningPenalty + statusPenalty + cancellationPenalty;
+    case 'reliable':
+      return statusPenalty + cancellationPenalty + warningPenalty + transfers * 100 + duration;
+    default:
+      return duration * 10 + transfers * 100 + warningPenalty + statusPenalty + cancellationPenalty;
+  }
+}
+
+function explainJourneyRecommendation(journey: JourneyOption, priority: JourneyRecommendationInput['priority']): string {
+  const duration = journey.summary.durationMinutes === null ? 'onbekende reistijd' : `${journey.summary.durationMinutes} minuten reistijd`;
+  const transfers = `${journey.summary.transfers} overstap${journey.summary.transfers === 1 ? '' : 'pen'}`;
+  const priorityText = {
+    balanced: 'de beste balans tussen reistijd, overstappen en waarschuwingen',
+    fastest: 'de kortste reistijd',
+    fewest_transfers: 'het minste aantal overstappen',
+    reliable: 'de laagste combinatie van status-, annulering- en waarschuwingrisico'
+  }[priority];
+
+  return `Aanbevolen op basis van ${priorityText}: ${duration} en ${transfers}.`;
+}
+
+function explainJourneyAlternative(journey: JourneyOption, priority: JourneyRecommendationInput['priority']): string {
+  if (journey.summary.status !== 'NORMAL') return `Deze optie heeft status ${journey.summary.status}.`;
+  if (journey.warnings.length > 0) return `Deze optie bevat ${journey.warnings.length} waarschuwing(en).`;
+  if (priority === 'fewest_transfers') return `Deze optie heeft ${journey.summary.transfers} overstap(pen).`;
+  if (journey.summary.durationMinutes !== null) return `Deze optie duurt ${journey.summary.durationMinutes} minuten.`;
+  return 'Deze optie is beschikbaar als alternatief.';
 }
 
 async function getResolvedDepartures(env: Env, input: { station: string; dateTime?: string; maxResults: number; language: Language }) {
@@ -1316,6 +1429,31 @@ function summarizeJourneys(from: string, to: string, journeys: JourneyOption[], 
   if (journeys.length === 0) return `Geen reisadviezen gevonden van ${from} naar ${to}. Controleer je reis in de NS-app of op ns.nl.`;
   const first = journeys[0];
   return `${journeys.length} reisadvies(s) gevonden van ${from} naar ${to}. Eerste vertrek: ${first.summary.departure ?? 'onbekend'}, aankomst: ${first.summary.arrival ?? 'onbekend'}. Response mode: ${responseMode}.`;
+}
+
+function formatJourneyRecommendation(result: {
+  fromStation: { station: StationResult | null };
+  toStation: { station: StationResult | null };
+  recommendation: JourneyOption | null;
+  recommendationReason: string;
+  alternatives: Array<{ journey: JourneyOption; reason: string }>;
+  disruptions: DisruptionResult[];
+  warnings: Array<{ source: string; message: string }>;
+}): string {
+  const from = result.fromStation.station?.name ?? 'onbekend vertrekstation';
+  const to = result.toStation.station?.name ?? 'onbekend aankomststation';
+  if (!result.recommendation) return `Geen actuele reisoptie gevonden van ${from} naar ${to}. Controleer je reis in de NS-app of op ns.nl.`;
+
+  const recommendation = result.recommendation;
+  const lines = [
+    `Aanbevolen reis van ${from} naar ${to}:`,
+    result.recommendationReason,
+    `Vertrek: ${recommendation.summary.departure ?? 'onbekend'} | Aankomst: ${recommendation.summary.arrival ?? 'onbekend'}.`
+  ];
+  if (result.alternatives.length > 0) lines.push(`Alternatieven: ${result.alternatives.map((alternative) => alternative.reason).join(' ')}`);
+  if (result.disruptions.length > 0) lines.push(`Let op: ${result.disruptions.length} actuele stationverstoring(en) gevonden.`);
+  if (result.warnings.length > 0) lines.push(`Waarschuwingen: ${result.warnings.length}.`);
+  return lines.join(' ');
 }
 
 function summarizeSingleTrip(ctxRecon: string, journeys: JourneyOption[]): string {

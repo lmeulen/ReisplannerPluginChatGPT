@@ -84,6 +84,7 @@ describe('Nederlandse Treinreisplanner MCP Worker', () => {
     const result = await readMcpResponse(response);
     expect(result.result.tools.map((tool: any) => tool.name)).toEqual([
       'plan_resolved_journey',
+      'recommend_journey',
       'get_resolved_station_departures',
       'get_resolved_station_arrivals',
       'get_resolved_station_disruptions',
@@ -101,6 +102,40 @@ describe('Nederlandse Treinreisplanner MCP Worker', () => {
       title: 'Plan resolved journey',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       outputSchema: { properties: { fromStation: { type: 'object' }, toStation: { type: 'object' }, journeys: { type: 'array' } } }
+    });
+  });
+
+  it('recommends the fastest resolved journey and returns alternatives', async () => {
+    mockNsSequence([
+      { payload: [{ code: 'AAA', namen: { lang: 'Alpha Station' }, land: 'NL' }] },
+      { payload: [{ code: 'BBB', namen: { lang: 'Beta Station' }, land: 'NL' }] },
+      {
+        trips: [
+          { uid: 'fast', plannedDurationInMinutes: 35, transfers: 1, status: 'NORMAL', legs: [] },
+          { uid: 'slow', plannedDurationInMinutes: 50, transfers: 0, status: 'NORMAL', legs: [] }
+        ]
+      },
+      { payload: [] },
+      { payload: [] }
+    ]);
+
+    const response = await callMcpTool(
+      'recommend_journey',
+      { from: 'Alpha Station', to: 'Beta Station', priority: 'fastest', maxAlternatives: 1 },
+      'recommendation-1'
+    );
+
+    expect(response.status).toBe(200);
+    await expect(readMcpResponse(response)).resolves.toMatchObject({
+      id: 'recommendation-1',
+      result: {
+        structuredContent: {
+          recommendation: { id: 'fast', summary: { durationMinutes: 35 } },
+          alternatives: [{ journey: { id: 'slow', summary: { durationMinutes: 50 } } }],
+          disruptions: [],
+          warnings: []
+        }
+      }
     });
   });
 

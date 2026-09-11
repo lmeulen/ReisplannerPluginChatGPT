@@ -42,6 +42,7 @@ Deze API-nabije tools blijven in de code beschikbaar voor interne compositie en 
 | Tool | Doel |
 | --- | --- |
 | `plan_resolved_journey` | Plan een reis met stationsnamen, stationcodes of typfouten. |
+| `recommend_journey` | Vergelijk actuele reisopties en geef een aanbeveling op basis van snelheid, overstappen of betrouwbaarheid. |
 | `get_resolved_station_departures` | Haal vertrekbord op met stationsnaam, stationcode of typfout. |
 | `get_resolved_station_arrivals` | Haal aankomstbord op met stationsnaam, stationcode of typfout. |
 | `get_resolved_station_disruptions` | Haal stationverstoringen op met stationsnaam, stationcode of typfout. |
@@ -83,6 +84,9 @@ Workflowtools geven daarnaast een vaste tekstuele presentatie terug in `content`
 | Zijn er meldingen of waarschuwingen voor mijn geplande reis? | `check_planned_journey_warnings` |
 | Plan een toegankelijke reis van Amsterdam Centraal naar Eindhoven Centraal. | `plan_resolved_journey` |
 | Plan een reis van Groningen naar Maastricht met zo min mogelijk overstappen. | `plan_resolved_journey` |
+| Welke reis raad je aan van Amsterdam Centraal naar Eindhoven als ik vooral snel wil aankomen? | `recommend_journey` |
+| Welke reis heeft de minste overstappen van Rotterdam naar Groningen? | `recommend_journey` |
+| Geef een betrouwbare reisoptie van Utrecht naar Schiphol met actuele waarschuwingen. | `recommend_journey` |
 
 ## Lokale setup
 

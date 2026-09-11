@@ -56,6 +56,7 @@ Deze API-nabije tools blijven intern beschikbaar voor compositie en hergebruik, 
 | Tool | Doel |
 | --- | --- |
 | `plan_resolved_journey` | Plan een reis met stationsnamen, stationcodes of typfouten. |
+| `recommend_journey` | Vergelijk actuele reisopties en geef een aanbeveling op basis van snelheid, overstappen of betrouwbaarheid. |
 | `get_resolved_station_departures` | Haal vertrekbord op met stationsnaam, stationcode of typfout. |
 | `get_resolved_station_arrivals` | Haal aankomstbord op met stationsnaam, stationcode of typfout. |
 | `get_resolved_station_disruptions` | Haal stationverstoringen op met stationsnaam, stationcode of typfout. |
@@ -76,6 +77,8 @@ Alle tools gebruiken dezelfde NS-normalisatie. MCP `structuredContent` is bewust
 Workflowtools gebruiken dezelfde resolver intern. Daardoor kunnen chatvragen zoals "plan Amsterdam naar Utrect", "welk spoor naar Schiphol", "wat kost Amsterdam naar Utrecht", "zoek Amsterdm" of "toon tussenstops van trein 3024" met een enkele MCP-call worden afgehandeld.
 
 Workflowtools sturen de presentatie extra aan via hun toolbeschrijving, serverinstructies en `content`. De teruggegeven tekst gebruikt een vaste volgorde voor treinreis, tijden, duur, overstappen, treinlegs, sporen en tussenstops. Buslegs worden uit deze tekstuele presentatie weggelaten. Dit is een sterke clienthint, geen garantie op een identieke visuele rendering: de MCP-client bepaalt zelf de uiteindelijke UI.
+
+`recommend_journey` rangschikt actuele reisopties met `priority`: `balanced`, `fastest`, `fewest_transfers` of `reliable`. De tool geeft één aanbeveling, maximaal twee alternatieven en relevante waarschuwingen terug. De ranking gebruikt alleen reistijd, overstappen, status, annuleringen en waarschuwingen uit de NS-response; er worden geen actuele reisgegevens afgeleid of verzonnen.
 
 Elke tool publiceert metadata voor ChatGPT tool scanning:
 
