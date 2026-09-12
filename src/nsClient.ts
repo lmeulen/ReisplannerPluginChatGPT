@@ -442,7 +442,8 @@ function normalizeStationInfo(station: any): StationInfoResult | null {
       : [],
     hasFacilities: booleanOrNull(station?.heeftFaciliteiten),
     hasTravelAssistance: booleanOrNull(station?.heeftReisassistentie),
-    hasDepartures: booleanOrNull(station?.heeftVertrektijden)
+    hasDepartures: booleanOrNull(station?.heeftVertrektijden),
+    weather: null
   };
 }
 
@@ -587,7 +588,8 @@ function normalizeJourneyStop(stop: any): JourneyStopResult {
     plannedPlatform: nullableString(firstDeparture?.plannedTrack ?? firstArrival?.plannedTrack),
     actualPlatform: nullableString(firstDeparture?.actualTrack ?? firstArrival?.actualTrack),
     status: nullableString(stop?.status),
-    cancelled: Boolean(firstDeparture?.cancelled ?? firstArrival?.cancelled)
+    cancelled: Boolean(firstDeparture?.cancelled ?? firstArrival?.cancelled),
+    weather: null
   };
 }
 

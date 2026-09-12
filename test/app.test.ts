@@ -326,6 +326,42 @@ describe('Nederlandse Treinreisplanner MCP Worker', () => {
     });
   });
 
+  it('embeds weather in station info without exposing a weather tool', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input.toString());
+        if (url.hostname === 'api.open-meteo.com') {
+          return Response.json({
+            latitude: 52.1,
+            longitude: 5.1,
+            current: {
+              time: '2026-09-12T12:00',
+              temperature_2m: 18.4,
+              apparent_temperature: 17.8,
+              precipitation: 0.2,
+              weather_code: 2,
+              wind_speed_10m: 12,
+              wind_direction_10m: 240
+            },
+            hourly: { time: ['2026-09-12T12:00'], precipitation_probability: [35] }
+          });
+        }
+
+        return Response.json({
+          payload: [{ code: 'WTH', UICCode: '8400001', EVACode: '8400001', namen: { lang: 'Weather Station' }, land: 'NL', lat: 52.1, lng: 5.1 }]
+        });
+      })
+    );
+
+    const response = await callMcpTool('get_station_info', { stationCode: 'WTH' }, 'station-weather-1');
+
+    expect(response.status).toBe(200);
+    expect(await readMcpResponse(response)).toMatchObject({
+      result: { structuredContent: { station: { code: 'WTH', weather: { temperatureCelsius: 18.4, precipitationProbabilityPercent: 35, weatherCode: 2 } } } }
+    });
+  });
+
   it('finds nearest stations from explicit coordinates', async () => {
     mockNsResponse({ payload: [{ code: 'UT', UICCode: '8400621', namen: { lang: 'Utrecht Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation', distance: 850 }] });
 
@@ -624,6 +660,42 @@ describe('Nederlandse Treinreisplanner MCP Worker', () => {
     expect(response.status).toBe(200);
     expect(await readMcpResponse(response)).toMatchObject({
       result: { structuredContent: { journeyDetails: { stops: [{ name: 'Amsterdam Centraal', actualDeparture: '2026-09-11T08:26:00+02:00' }] } } }
+    });
+  });
+
+  it('embeds weather in detailed journey stops', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input.toString());
+        if (url.hostname === 'api.open-meteo.com') {
+          return Response.json({
+            latitude: 52.2,
+            longitude: 5.2,
+            current: { time: '2026-09-12T12:00', temperature_2m: 19, weather_code: 1 },
+            hourly: { time: ['2026-09-12T12:00'], precipitation_probability: [10] }
+          });
+        }
+
+        if (url.pathname.endsWith('/v2/journey')) {
+          return Response.json({
+            payload: {
+              source: 'HARP',
+              productNumbers: ['9999'],
+              stops: [{ id: 'weather-stop', kind: 'DEPARTURE', stop: { namen: { lang: 'Weather Test Station' } }, departures: [] }]
+            }
+          });
+        }
+
+        return Response.json({ payload: [{ code: 'WTS', namen: { lang: 'Weather Test Station' }, land: 'NL', lat: 52.2, lng: 5.2 }] });
+      })
+    );
+
+    const response = await callMcpTool('get_train_stops', { journeyDetailRef: 'weather-journey-ref' }, 'journey-weather-1');
+
+    expect(response.status).toBe(200);
+    expect(await readMcpResponse(response)).toMatchObject({
+      result: { structuredContent: { journeyDetails: { stops: [{ name: 'Weather Test Station', weather: { temperatureCelsius: 19, weatherCode: 1 } }] } } }
     });
   });
 

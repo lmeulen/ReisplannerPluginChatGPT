@@ -37,7 +37,7 @@ De endpoint ondersteunt deze MCP-methodes:
 | Tool | Doel |
 | --- | --- |
 | `search_stations` | Zoek stations en stationcodes met optionele landfiltering en fuzzy typo fallback. |
-| `get_station_info` | Haal stationsdetails op voor een stationcode. |
+| `get_station_info` | Haal stationsdetails op voor een stationcode, inclusief best-effort weerinformatie. |
 | `get_nearest_stations` | Zoek stations bij expliciet opgegeven coordinaten. |
 | `get_station_departures` | Haal het actuele vertrekbord voor een station op. |
 | `get_station_arrivals` | Haal het actuele aankomstbord voor een station op. |
@@ -61,7 +61,7 @@ Deze API-nabije tools blijven intern beschikbaar voor compositie en hergebruik, 
 | `get_resolved_station_arrivals` | Haal aankomstbord op met stationsnaam, stationcode of typfout. |
 | `get_resolved_station_disruptions` | Haal stationverstoringen op met stationsnaam, stationcode of typfout. |
 | `price_resolved_journey` | Plan en prijs een reis met stationsnamen of typfouten. |
-| `get_planned_journey_details` | Plan een reis en haal details van de beste optie op. |
+| `get_planned_journey_details` | Plan een reis en haal details van de beste optie op, inclusief weer per halte wanneer beschikbaar. |
 | `check_route_disruptions` | Controleer routewaarschuwingen en stationverstoringen. |
 | `check_journey_status` | Controleer reisstatus en waarschuwingen. |
 | `check_journey_status_ref` | Controleer een eerder geplande reis met `ctxRecon` of een enkele treinrit met `journeyDetailRef`. |
@@ -69,13 +69,15 @@ Deze API-nabije tools blijven intern beschikbaar voor compositie en hergebruik, 
 | `check_planned_journey_warnings` | Verzamel waarschuwingen voor een geplande reis. |
 | `resolve_station` | Vind de beste stationmatch voor naam, afkorting, code of typfout. |
 | `find_nearest_station` | Vind het dichtstbijzijnde station bij expliciete coordinaten. |
-| `get_train_stops` | Toon tussenstops met `journeyDetailRef`, treinnummer of route. |
+| `get_train_stops` | Toon tussenstops met `journeyDetailRef`, treinnummer of route, inclusief weer per halte wanneer beschikbaar. |
 
 Alle tools gebruiken dezelfde NS-normalisatie. MCP `structuredContent` is bewust minimaal gehouden: alleen de data die de tool belooft terug te geven. De tekstuele `content` bevat een korte samenvatting en, waar nodig, een verwijzing naar NS-app of ns.nl.
 
 `search_stations` probeert eerst de exacte NS-stationszoekopdracht. Als NS geen resultaten teruggeeft, haalt de server de volledige stationslijst op en kiest lokaal de beste matches met genormaliseerde namen, aliases, synoniemen en Levenshtein-afstand. Resultaten bevatten `matchType` met `exact`, `contains`, `fuzzy` of `fallback`.
 
 Workflowtools gebruiken dezelfde resolver intern. Daardoor kunnen chatvragen zoals "plan Amsterdam naar Utrect", "welk spoor naar Schiphol", "wat kost Amsterdam naar Utrecht", "zoek Amsterdm" of "toon tussenstops van trein 3024" met een enkele MCP-call worden afgehandeld.
+
+De bestaande detailtools verrijken hun response met een `weather`-object op stationsdetails en op iedere ritstop waarvoor een station met coordinaten kan worden gevonden. Het object bevat `temperatureCelsius`, `apparentTemperatureCelsius`, `precipitationProbabilityPercent`, `precipitationMillimeters`, `windSpeedKmh`, `windDirectionDegrees`, `weatherCode`, `observedAt`, `source` en `retrievedAt`. Er is geen aparte weather-tool. Weer is best-effort: ontbrekende coordinaten of een providerfout resulteert in `weather: null` zonder de treinresponse te laten mislukken.
 
 Workflowtools sturen de presentatie extra aan via hun toolbeschrijving, serverinstructies en `content`. De teruggegeven tekst gebruikt een vaste volgorde voor treinreis, tijden, duur, overstappen, treinlegs, sporen en tussenstops. Buslegs worden uit deze tekstuele presentatie weggelaten. Dit is een sterke clienthint, geen garantie op een identieke visuele rendering: de MCP-client bepaalt zelf de uiteindelijke UI.
 
@@ -105,6 +107,8 @@ MCP_RATE_LIMIT_PER_MINUTE = "45"
 De primaire rate-limit gebruikt een Cloudflare Durable Object binding, zodat tellers niet per Worker isolate versnipperen. Als de binding lokaal ontbreekt, valt de server terug op een in-memory limiter voor tests en lokale ontwikkeling. Voor publieke distributie of hogere volumes blijft een aanvullende Cloudflare WAF/rate limiting rule op `/mcp` aanbevolen.
 
 Stationszoekopdrachten en stationsdetails worden maximaal 24 uur per Worker isolate gecachet. Dichtstbijzijnde stations worden 10 minuten gecachet op afgeronde coordinaten. Vertrekborden, aankomstborden, single trips, ritdetails en verstoringen worden kort gecachet. Prijzen worden 1 uur gecachet. Nieuwe reisplanningen worden niet gecachet.
+
+Weerdata wordt op afgeronde coordinaten 10 minuten gecachet. De standaardprovider is Open-Meteo; een alternatieve compatibele endpoint kan via `WEATHER_API_BASE_URL` worden ingesteld.
 
 Observability is privacybewust: logs bevatten toolnaam, outcome en duur, maar geen API-keys, volledige toolargumenten of volledige reisadviezen.
 

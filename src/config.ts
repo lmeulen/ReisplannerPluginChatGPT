@@ -1,9 +1,14 @@
 import type { Env, ResponseMode } from './types';
 
 const DEFAULT_NS_API_BASE_URL = 'https://gateway.apiportal.ns.nl/reisinformatie-api/api';
+const DEFAULT_WEATHER_API_BASE_URL = 'https://api.open-meteo.com/v1/forecast';
 
 export function getNsApiBaseUrl(env: Env): string {
   return stripTrailingSlash(env.NS_API_BASE_URL || DEFAULT_NS_API_BASE_URL);
+}
+
+export function getWeatherApiBaseUrl(env: Env): string {
+  return stripTrailingSlash(env.WEATHER_API_BASE_URL || DEFAULT_WEATHER_API_BASE_URL);
 }
 
 export function getDefaultResponseMode(env: Env): ResponseMode {

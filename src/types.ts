@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 export interface Env {
   NS_API_KEY: string;
   NS_API_BASE_URL?: string;
+  WEATHER_API_BASE_URL?: string;
   RESPONSE_MODE?: ResponseMode;
   LOG_LEVEL?: 'debug' | 'info' | 'warn' | 'error';
   MCP_RATE_LIMIT_PER_MINUTE?: string;
@@ -149,6 +150,22 @@ export interface StationInfoResult {
   hasFacilities: boolean | null;
   hasTravelAssistance: boolean | null;
   hasDepartures: boolean | null;
+  weather: WeatherResult | null;
+}
+
+export interface WeatherResult {
+  latitude: number;
+  longitude: number;
+  observedAt: string | null;
+  temperatureCelsius: number | null;
+  apparentTemperatureCelsius: number | null;
+  precipitationProbabilityPercent: number | null;
+  precipitationMillimeters: number | null;
+  windSpeedKmh: number | null;
+  windDirectionDegrees: number | null;
+  weatherCode: number | null;
+  source: string;
+  retrievedAt: string;
 }
 
 export interface RouteStationResult {
@@ -252,6 +269,7 @@ export interface JourneyStopResult {
   actualPlatform: string | null;
   status: string | null;
   cancelled: boolean;
+  weather: WeatherResult | null;
 }
 
 export interface JourneyDetailsResult {

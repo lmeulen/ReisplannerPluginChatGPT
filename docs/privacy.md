@@ -28,6 +28,8 @@ Invoer wordt gebruikt om:
 
 Reisplannerrequests worden doorgestuurd naar de NS Reisplanner API. Raadpleeg ook de voorwaarden en privacyinformatie van NS voor de verwerking door NS.
 
+Voor weerinformatie worden stationcoordinaten doorgestuurd naar de geconfigureerde weerprovider. De standaardprovider is Open-Meteo. Weer wordt alleen opgehaald als een station of halte over coordinaten beschikt; expliciete gebruikerslocaties voor `get_nearest_stations` worden niet automatisch voor weer gebruikt.
+
 ## Logging
 
 De Worker logt technische gebeurtenissen zoals toolnaam, resultaatstatus en duur van de call. De server logt geen `NS_API_KEY`, volledige toolargumenten of volledige reisadviezen.
@@ -41,6 +43,7 @@ De applicatie bewaart zelf geen permanente gebruikersprofielen of reisgeschieden
 - stationszoekopdrachten en stationsdetails: maximaal 24 uur per Worker isolate;
 - dichtstbijzijnde stations: maximaal 10 minuten per Worker isolate, keyed op afgeronde coordinaten;
 - stationborden, ritdetails en verstoringen: kort, meestal maximaal 60 seconden per Worker isolate;
+- weerinformatie: maximaal 10 minuten per Worker isolate op afgeronde coordinaten;
 - prijsinformatie: maximaal 1 uur per Worker isolate;
 - rate-limit tellers: maximaal circa 1 minuut in een Cloudflare Durable Object.
 
@@ -51,7 +54,8 @@ Cloudflare platformlogs kunnen volgens de instellingen van het Cloudflare-accoun
 Gegevens worden alleen gedeeld met partijen die nodig zijn om de dienst te leveren:
 
 - Cloudflare voor hosting, beveiliging en rate limiting;
-- NS Reisplanner API voor actuele treinreisinformatie.
+- NS Reisplanner API voor actuele treinreisinformatie;
+- de geconfigureerde weerprovider voor weerinformatie op stationcoordinaten.
 
 ## Contact
 

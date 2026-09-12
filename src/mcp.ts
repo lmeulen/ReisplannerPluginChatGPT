@@ -2,8 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod/v4';
 
-import { getDefaultResponseMode, getMcpRateLimitPerMinute, getNsApiBaseUrl } from './config';
+import { getDefaultResponseMode, getMcpRateLimitPerMinute, getNsApiBaseUrl, getWeatherApiBaseUrl } from './config';
 import { NsClient } from './nsClient';
+import { WeatherClient } from './weatherClient';
 import type {
   AppContext,
   DisruptionResult,
@@ -17,7 +18,8 @@ import type {
   StationArrivalResult,
   StationDepartureResult,
   StationInfoResult,
-  StationResult
+  StationResult,
+  WeatherResult
 } from './types';
 
 type JsonRpcId = string | number | null;
@@ -50,6 +52,7 @@ const priceCache = new Map<string, CachedValue<DomesticPriceResult | null>>();
 const disruptionCache = new Map<string, CachedValue<DisruptionResult[]>>();
 const stationDisruptionCache = new Map<string, CachedValue<DisruptionResult[]>>();
 const singleDisruptionCache = new Map<string, CachedValue<DisruptionResult | null>>();
+const weatherCache = new Map<string, CachedValue<WeatherResult | null>>();
 
 const readOnlyOpenWorldAnnotations = {
   readOnlyHint: true,
@@ -76,6 +79,21 @@ const stationOutputSchema = z.object({
   distanceMeters: z.number().nullable().optional()
 });
 
+const weatherOutputSchema = z.object({
+  latitude: z.number(),
+  longitude: z.number(),
+  observedAt: z.string().nullable(),
+  temperatureCelsius: z.number().nullable(),
+  apparentTemperatureCelsius: z.number().nullable(),
+  precipitationProbabilityPercent: z.number().nullable(),
+  precipitationMillimeters: z.number().nullable(),
+  windSpeedKmh: z.number().nullable(),
+  windDirectionDegrees: z.number().nullable(),
+  weatherCode: z.number().nullable(),
+  source: z.string(),
+  retrievedAt: z.string()
+});
+
 const stationInfoOutputSchema = z.object({
   code: z.string(),
   name: z.string(),
@@ -90,7 +108,8 @@ const stationInfoOutputSchema = z.object({
   tracks: z.array(z.string()),
   hasFacilities: z.boolean().nullable(),
   hasTravelAssistance: z.boolean().nullable(),
-  hasDepartures: z.boolean().nullable()
+  hasDepartures: z.boolean().nullable(),
+  weather: weatherOutputSchema.nullable()
 });
 
 const routeStationOutputSchema = z.object({
@@ -185,7 +204,8 @@ const journeyDetailsOutputSchema = z.object({
       plannedPlatform: z.string().nullable(),
       actualPlatform: z.string().nullable(),
       status: z.string().nullable(),
-      cancelled: z.boolean()
+      cancelled: z.boolean(),
+      weather: weatherOutputSchema.nullable()
     })
   ),
   notes: z.array(z.string())
@@ -1383,8 +1403,9 @@ async function getCachedStationInfo(env: Env, stationCode: string, language: Lan
   if (cached !== null) return cached;
 
   const station = await nsClient(env).getStationInfo({ stationCode, language });
-  setCache(stationInfoCache, key, station, 86_400_000);
-  return station;
+  const enrichedStation = station ? { ...station, weather: await getCachedWeather(env, station.latitude, station.longitude) } : null;
+  setCache(stationInfoCache, key, enrichedStation, 86_400_000);
+  return enrichedStation;
 }
 
 async function getCachedNearestStations(env: Env, input: { latitude: number; longitude: number; limit: number; language: Language }): Promise<StationResult[]> {
@@ -1434,8 +1455,51 @@ async function getCachedJourneyDetails(env: Env, input: { journeyDetailRef?: str
   if (cached) return cached;
 
   const journeyDetails = await nsClient(env).getJourneyDetails(input);
-  setCache(journeyDetailsCache, key, journeyDetails, 30_000);
-  return journeyDetails;
+  const enrichedJourneyDetails = await enrichJourneyDetailsWeather(env, journeyDetails, input.language);
+  setCache(journeyDetailsCache, key, enrichedJourneyDetails, 30_000);
+  return enrichedJourneyDetails;
+}
+
+async function enrichJourneyDetailsWeather(env: Env, journeyDetails: JourneyDetailsResult, language: Language): Promise<JourneyDetailsResult> {
+  const weatherByStop = new Map<string, Promise<WeatherResult | null>>();
+  const stops = await Promise.all(
+    journeyDetails.stops.map(async (stop) => {
+      const key = stop.name.toLocaleLowerCase('nl-NL');
+      if (!key) return stop;
+      if (!weatherByStop.has(key)) {
+        weatherByStop.set(
+          key,
+          getCachedStations(env, stop.name, language, 1).then(async (stations) => {
+            const station = stations[0];
+            return station ? getCachedWeather(env, station.latitude, station.longitude) : null;
+          })
+        );
+      }
+      return { ...stop, weather: await weatherByStop.get(key)! };
+    })
+  );
+
+  return { ...journeyDetails, stops };
+}
+
+async function getCachedWeather(env: Env, latitude: number | null, longitude: number | null): Promise<WeatherResult | null> {
+  if (latitude === null || longitude === null) return null;
+
+  const roundedLatitude = roundCoordinate(latitude);
+  const roundedLongitude = roundCoordinate(longitude);
+  const key = `${roundedLatitude}:${roundedLongitude}`;
+  const cached = weatherCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) weatherCache.delete(key);
+
+  try {
+    const weather = await weatherClient(env).getWeather(roundedLatitude, roundedLongitude);
+    setCache(weatherCache, key, weather, 600_000);
+    return weather;
+  } catch {
+    setCache(weatherCache, key, null, 60_000);
+    return null;
+  }
 }
 
 async function getCachedDomesticPrice(env: Env, input: { fromStation: string; toStation: string; travelClass?: string; travelType?: string; isJointJourney: boolean; adults: number; children: number; routeId?: string; plannedFromTime?: string; plannedArrivalTime?: string }): Promise<DomesticPriceResult | null> {
@@ -1779,6 +1843,10 @@ function roundCoordinate(value: number): number {
 
 function nsClient(env: Env): NsClient {
   return new NsClient({ apiKey: env.NS_API_KEY, baseUrl: getNsApiBaseUrl(env) });
+}
+
+function weatherClient(env: Env): WeatherClient {
+  return new WeatherClient({ baseUrl: getWeatherApiBaseUrl(env) });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

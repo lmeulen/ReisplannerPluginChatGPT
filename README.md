@@ -23,7 +23,7 @@ flowchart LR
 | Tool | Doel |
 | --- | --- |
 | `search_stations` | Zoek stations en stationcodes met optionele landfiltering en fuzzy typo fallback. |
-| `get_station_info` | Haal stationsdetails op voor een stationcode. |
+| `get_station_info` | Haal stationsdetails op voor een stationcode, inclusief best-effort weerinformatie wanneer coordinaten beschikbaar zijn. |
 | `get_nearest_stations` | Zoek stations bij expliciet opgegeven coordinaten. |
 | `get_station_departures` | Haal het actuele vertrekbord voor een station op. |
 | `get_station_arrivals` | Haal het actuele aankomstbord voor een station op. |
@@ -47,7 +47,7 @@ Deze API-nabije tools blijven in de code beschikbaar voor interne compositie en 
 | `get_resolved_station_arrivals` | Haal aankomstbord op met stationsnaam, stationcode of typfout. |
 | `get_resolved_station_disruptions` | Haal stationverstoringen op met stationsnaam, stationcode of typfout. |
 | `price_resolved_journey` | Plan en prijs een reis met stationsnamen of typfouten. |
-| `get_planned_journey_details` | Plan een reis en haal details van de beste optie op. |
+| `get_planned_journey_details` | Plan een reis en haal details van de beste optie op, inclusief weerinformatie per halte wanneer beschikbaar. |
 | `check_route_disruptions` | Controleer routewaarschuwingen en stationverstoringen. |
 | `check_journey_status` | Controleer reisstatus en waarschuwingen. |
 | `check_journey_status_ref` | Controleer een eerder geplande reis met `ctxRecon` of een enkele treinrit met `journeyDetailRef`. |
@@ -55,9 +55,11 @@ Deze API-nabije tools blijven in de code beschikbaar voor interne compositie en 
 | `check_planned_journey_warnings` | Verzamel waarschuwingen voor een geplande reis. |
 | `resolve_station` | Vind de beste stationmatch voor naam, afkorting, code of typfout. |
 | `find_nearest_station` | Vind het dichtstbijzijnde station bij expliciete coordinaten. |
-| `get_train_stops` | Toon tussenstops met `journeyDetailRef`, treinnummer of route. |
+| `get_train_stops` | Toon tussenstops met `journeyDetailRef`, treinnummer of route, inclusief weerinformatie per halte wanneer beschikbaar. |
 
 Alle tools zijn read-only, gebruiken minimale `structuredContent` en publiceren ChatGPT-relevante metadata zoals `title`, `inputSchema`, `outputSchema` en annotations. `search_stations` retourneert per resultaat een `matchType` zoals `exact`, `contains`, `fuzzy` of `fallback`. Gebruik voor chatvragen bij voorkeur de workflowtools; die resolveeren stationsnamen en typfouten in dezelfde MCP-call.
+
+Station- en ritdetails bevatten waar mogelijk een `weather`-object met actuele temperatuur, gevoelstemperatuur, neerslagkans, neerslag, wind en een weerclassificatie. Weer is aanvullende informatie en wordt niet als aparte MCP-tool aangeboden. Als coordinaten ontbreken of de weerprovider niet beschikbaar is, blijft `weather` `null` en blijft de NS-informatie beschikbaar.
 
 Workflowtools geven daarnaast een vaste tekstuele presentatie terug in `content`. De client wordt gevraagd deze tekst als primaire weergave te gebruiken, inclusief de vaste volgorde van vertrek, aankomst, duur, overstappen, treinlegs, sporen en tussenstops. In deze presentatie worden buslegs weggelaten; de MCP-server kan de exacte visuele kaartweergave van de client niet afdwingen.
 
@@ -130,6 +132,7 @@ Workflowtools geven daarnaast een vaste tekstuele presentatie terug in `content`
 | --- | --- |
 | `NS_API_KEY` | Subscription key voor de NS API. |
 | `NS_API_BASE_URL` | Basis-URL van de NS Reisplanner API. |
+| `WEATHER_API_BASE_URL` | Optionele basis-URL voor de Open-Meteo forecast API. Default: `https://api.open-meteo.com/v1/forecast`. |
 | `RESPONSE_MODE` | `strict` of `flexible`; beïnvloedt de tekstuele reisplansamenvatting. |
 | `LOG_LEVEL` | Gebruik `info` voor productie en `debug` voor requestmetadata tijdens debugging. |
 | `MCP_RATE_LIMIT_PER_MINUTE` | Maximum aantal publieke MCP tool-calls per client per minuut via de Durable Object limiter. Default: `45`. |
