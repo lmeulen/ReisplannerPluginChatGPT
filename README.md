@@ -18,27 +18,6 @@ flowchart LR
 
 ## MCP-tools
 
-### API-nabije tools (niet extern exposed)
-
-| Tool | Doel |
-| --- | --- |
-| `search_stations` | Zoek stations en stationcodes met optionele landfiltering en fuzzy typo fallback. |
-| `get_station_info` | Haal stationsdetails op voor een stationcode, inclusief best-effort weerinformatie wanneer coordinaten beschikbaar zijn. |
-| `get_nearest_stations` | Zoek stations bij expliciet opgegeven coordinaten. |
-| `get_station_departures` | Haal het actuele vertrekbord voor een station op. |
-| `get_station_arrivals` | Haal het actuele aankomstbord voor een station op. |
-| `plan_journey` | Plan een actuele treinreis. |
-| `get_single_trip` | Reconstrueer een volledige trip met `ctxRecon`. |
-| `get_journey_details` | Haal ritdetails op met `journeyDetailRef` of treinnummer. |
-| `get_domestic_price` | Haal binnenlandse prijsinformatie op. |
-| `get_disruptions` | Haal algemene verstoringen, calamiteiten en werkzaamheden op. |
-| `get_station_disruptions` | Haal station-specifieke verstoringen op. |
-| `get_single_disruption` | Haal details van een verstoring op. |
-
-Deze API-nabije tools blijven in de code beschikbaar voor interne compositie en hergebruik, maar worden niet geregistreerd in de publieke MCP-toolset. Externe MCP-clients zien uitsluitend de workflowtools hieronder.
-
-### Workflowtools
-
 | Tool | Doel |
 | --- | --- |
 | `plan_resolved_journey` | Plan een reis met stationsnamen, stationcodes of typfouten. |
@@ -61,7 +40,27 @@ Alle tools zijn read-only, gebruiken minimale `structuredContent` en publiceren 
 
 Station- en ritdetails bevatten waar mogelijk een `weather`-object met actuele temperatuur, gevoelstemperatuur, neerslagkans, neerslag, wind en een weerclassificatie. Weer is aanvullende informatie en wordt niet als aparte MCP-tool aangeboden. Als coordinaten ontbreken of de weerprovider niet beschikbaar is, blijft `weather` `null` en blijft de NS-informatie beschikbaar.
 
-Workflowtools geven daarnaast een vaste tekstuele presentatie terug in `content`. De client wordt gevraagd deze tekst als primaire weergave te gebruiken, inclusief de vaste volgorde van vertrek, aankomst, duur, overstappen, treinlegs, sporen en tussenstops. In deze presentatie worden buslegs weggelaten; de MCP-server kan de exacte visuele kaartweergave van de client niet afdwingen.
+Tools geven daarnaast een vaste tekstuele presentatie terug in `content`. De client wordt gevraagd deze tekst als primaire weergave te gebruiken, inclusief de vaste volgorde van vertrek, aankomst, duur, overstappen, treinlegs, sporen en tussenstops. In deze presentatie worden buslegs weggelaten; de MCP-server kan de exacte visuele kaartweergave van de client niet afdwingen.
+
+### API-nabije tools (niet extern exposed)
+
+| Tool | Doel |
+| --- | --- |
+| `search_stations` | Zoek stations en stationcodes met optionele landfiltering en fuzzy typo fallback. |
+| `get_station_info` | Haal stationsdetails op voor een stationcode, inclusief best-effort weerinformatie wanneer coordinaten beschikbaar zijn. |
+| `get_nearest_stations` | Zoek stations bij expliciet opgegeven coordinaten. |
+| `get_station_departures` | Haal het actuele vertrekbord voor een station op. |
+| `get_station_arrivals` | Haal het actuele aankomstbord voor een station op. |
+| `plan_journey` | Plan een actuele treinreis. |
+| `get_single_trip` | Reconstrueer een volledige trip met `ctxRecon`. |
+| `get_journey_details` | Haal ritdetails op met `journeyDetailRef` of treinnummer. |
+| `get_domestic_price` | Haal binnenlandse prijsinformatie op. |
+| `get_disruptions` | Haal algemene verstoringen, calamiteiten en werkzaamheden op. |
+| `get_station_disruptions` | Haal station-specifieke verstoringen op. |
+| `get_single_disruption` | Haal details van een verstoring op. |
+
+Deze API-nabije tools blijven in de code beschikbaar voor interne compositie en hergebruik, maar worden niet geregistreerd in de publieke MCP-toolset. Externe MCP-clients zien uitsluitend de workflowtools hieronder.
+
 
 ### Voorbeeldvragen
 
