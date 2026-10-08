@@ -83,6 +83,8 @@ Current cache lifetimes:
 
 Cache keys include the query inputs that affect results. Coordinates are rounded before nearest-station and weather lookups. When adding a cache, account for freshness, language, and every result-affecting parameter; use the existing `getFromCache`/`setCache` helpers where appropriate.
 
+The table describes each cache's own TTL. An aggregate result can retain nested data longer: for example, station information (including its weather object) is cached for 24 hours even though standalone weather entries expire after 10 minutes.
+
 ## Adding Functionality
 
 ### Add or change an upstream NS operation
