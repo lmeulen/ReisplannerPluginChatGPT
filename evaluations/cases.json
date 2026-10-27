@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "nl-direct-journey",
+      "kind": "positive",
+      "language": "nl",
+      "prompt": "Plan een treinreis van Amsterdam Centraal naar Utrecht Centraal.",
+      "expected": { "tool": "plan_journey", "action": "invoke" },
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-indirect-journey",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "What's the easiest train route from Eindhoven to Groningen?",
+      "expected": { "tool": "plan_journey", "action": "invoke" },
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "nl-arrival-deadline",
+      "kind": "positive",
+      "language": "nl",
+      "prompt": "Ik moet morgen om 16:00 in Maastricht zijn. Welke trein kan ik vanuit Amsterdam nemen?",
+      "expected": { "tool": "plan_journey", "action": "invoke" },
+      "manualChecks": [
+        "Call plan_journey with searchForArrival=true.",
+        "Set dateTime to tomorrow at 16:00 Europe/Amsterdam with the offset valid for that date.",
+        "If Amsterdam resolves ambiguously, show candidates and ask the user to choose."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-arrival-deadline",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Find a train from Rotterdam Centraal to Utrecht Centraal by 9:00 tomorrow, Amsterdam time.",
+      "expected": { "tool": "plan_journey", "action": "invoke" },
+      "manualChecks": [
+        "Call plan_journey with searchForArrival=true.",
+        "Set dateTime to tomorrow at 09:00 Europe/Amsterdam with the offset valid for that date.",
+        "Use Rotterdam Centraal and Utrecht Centraal as the route endpoints."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "nl-departure-board",
+      "kind": "positive",
+      "language": "nl",
+      "prompt": "Welke treinen vertrekken morgen rond 12:15 vanaf Rotterdam Centraal?",
+      "expected": { "tool": "get_departures", "action": "invoke" },
+      "manualChecks": [
+        "Call get_departures for Rotterdam Centraal.",
+        "Set dateTime to tomorrow around 12:15 Europe/Amsterdam with the offset valid for that date."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-departures-now",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Show me the next trains leaving Utrecht Centraal.",
+      "expected": { "tool": "get_departures", "action": "invoke" },
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "nl-station-disruptions",
+      "kind": "positive",
+      "language": "nl",
+      "prompt": "Zijn er geplande werkzaamheden bij station Delft deze week?",
+      "expected": { "tool": "get_disruptions", "action": "invoke" },
+      "manualChecks": [
+        "Request station-scoped notices for Delft and omit isActive to include planned works.",
+        "Use returned start and end times to assess this week; do not claim route impact from a station notice alone."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-national-disruptions",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Are there any current disruptions or planned works on the Dutch rail network?",
+      "expected": { "tool": "get_disruptions", "action": "invoke" },
+      "manualChecks": [
+        "Request national notices by omitting station and isActive.",
+        "Do not claim that a national notice affects a specific journey."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "nl-ambiguous-city-stations",
+      "kind": "positive",
+      "language": "nl",
+      "prompt": "Plan een treinreis van Amsterdam naar Rotterdam.",
+      "expected": { "tool": "plan_journey", "action": "invoke_then_clarify" },
+      "manualChecks": [
+        "Call plan_journey with the city names as supplied.",
+        "If station resolution returns candidates, ask the user to choose instead of silently selecting one."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-clear-typo",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Can I get a train from Amsterdm Centraal to Utrecht Centraal now?",
+      "expected": { "tool": "plan_journey", "action": "invoke" },
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "nl-missing-destination",
+      "kind": "positive",
+      "language": "nl",
+      "prompt": "Ik wil morgen met de trein vanuit Zwolle.",
+      "expected": { "tool": null, "action": "ask_missing_input" },
+      "manualChecks": [
+        "Do not call an NS tool until the destination is supplied.",
+        "Do not infer a destination or the user's location."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-missing-origin",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Find me a train to Delft this afternoon.",
+      "expected": { "tool": null, "action": "ask_missing_input" },
+      "manualChecks": [
+        "Do not call an NS tool until the origin is supplied.",
+        "Do not infer the user's location."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "nl-ticket-price",
+      "kind": "negative",
+      "language": "nl",
+      "prompt": "Wat kost een treinkaartje van Leiden naar Den Haag?",
+      "expected": { "tool": null, "action": "no_ns_call" },
+      "runModes": ["untagged"]
+    },
+    {
+      "id": "en-booking-request",
+      "kind": "negative",
+      "language": "en",
+      "prompt": "Book me a seat on the 18:00 train from Amsterdam to Utrecht.",
+      "expected": { "tool": null, "action": "no_ns_call" },
+      "runModes": ["untagged"]
+    },
+    {
+      "id": "nl-ov-fiets",
+      "kind": "negative",
+      "language": "nl",
+      "prompt": "Zijn er nu OV-fietsen beschikbaar op Utrecht Centraal?",
+      "expected": { "tool": null, "action": "no_ns_call" },
+      "runModes": ["untagged"]
+    },
+    {
+      "id": "en-local-transit-only",
+      "kind": "negative",
+      "language": "en",
+      "prompt": "Which tram should I take from Den Haag Centraal to the city centre?",
+      "expected": { "tool": null, "action": "no_ns_call" },
+      "runModes": ["untagged"]
+    },
+    {
+      "id": "nl-translation-only",
+      "kind": "negative",
+      "language": "nl",
+      "prompt": "Vertaal 'train delayed' naar het Nederlands.",
+      "expected": { "tool": null, "action": "no_ns_call" },
+      "runModes": ["untagged"]
+    },
+    {
+      "id": "en-rail-history",
+      "kind": "negative",
+      "language": "en",
+      "prompt": "When did Utrecht Centraal first open, and who designed the station?",
+      "expected": { "tool": null, "action": "no_ns_call" },
+      "runModes": ["untagged"]
+    },
+    {
+      "id": "nl-accessible-planning",
+      "kind": "positive",
+      "language": "nl",
+      "prompt": "Plan een toegankelijke treinreis van Leiden naar Delft.",
+      "expected": { "tool": "plan_journey", "action": "invoke" },
+      "manualChecks": [
+        "Call plan_journey with accessible=true.",
+        "Do not imply that assistance has been reserved."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-departures-missing-station",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Show me the next train departures.",
+      "expected": { "tool": null, "action": "ask_missing_input" },
+      "manualChecks": [
+        "Do not call get_departures until a station is supplied.",
+        "Ask which station; do not infer the user's location."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-dst-fall-back-ambiguous-time",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Find a train from Amsterdam Centraal to Utrecht Centraal at 02:30 local time on the next night in the Netherlands when clocks go back.",
+      "expected": { "tool": null, "action": "ask_missing_input" },
+      "manualChecks": [
+        "Do not call an NS tool until the user clarifies which occurrence of 02:30 they mean."
+      ],
+      "runModes": ["untagged", "tagged"]
+    },
+    {
+      "id": "en-dst-spring-forward-nonexistent-time",
+      "kind": "positive",
+      "language": "en",
+      "prompt": "Find a train from Amsterdam Centraal to Utrecht Centraal at 02:30 local time on the next night in the Netherlands when clocks go forward.",
+      "expected": { "tool": null, "action": "ask_missing_input" },
+      "manualChecks": [
+        "Do not call an NS tool for the nonexistent local time; ask the user for a valid time."
+      ],
+      "runModes": ["untagged", "tagged"]
+    }
+  ]
+}

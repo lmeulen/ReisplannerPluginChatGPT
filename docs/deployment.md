@@ -1,98 +1,19 @@
-# Deployment en validatie
+# Deployment guidance
 
-## Voorwaarden
+Local source work and production release are separate. Deploy only after the
+owner approves the target account and service.
 
-- Node.js 22 of nieuwer.
-- Een Cloudflare-account.
-- Wrangler-authenticatie via `wrangler login`.
-- Een geldige NS API subscription key.
+1. Install the lockfile dependencies with `npm ci`.
+2. Run `npm run validate`, `npm run types:check`, and `npm run deploy:dry-run`.
+3. Confirm Wrangler is authenticated to the intended account. Do not place
+   account identifiers or credentials in source files.
+4. Provision `NS_API_KEY` as a Worker secret with `npx wrangler secret put NS_API_KEY`.
+   Never commit the key or pass it through chat, logs, or tool inputs.
+5. After deployment approval, run `npm run deploy`.
+6. Verify the deployed `/health` route, initialize MCP, confirm the exact
+   three-tool catalog, and make representative live calls only when authorized.
+7. Build a portable plugin package only against the endpoint that was just
+   verified. Review the archive before any separate plugin upload or install.
 
-## Installatie
-
-```powershell
-npm install
-```
-
-Als `npm` niet globaal op je PATH staat, gebruik de lokale wrapper:
-
-```powershell
-.\scripts\npm.ps1 install
-```
-
-## Lokale validatie
-
-```powershell
-npm run typecheck
-npm test
-npm run validate
-```
-
-Zonder globale Node/npm-installatie:
-
-```powershell
-.\scripts\npm.ps1 run validate
-```
-
-## Secret instellen
-
-```powershell
-wrangler secret put NS_API_KEY
-```
-
-Zonder globale Wrangler-installatie:
-
-```powershell
-.\scripts\wrangler.ps1 secret put NS_API_KEY
-```
-
-## Lokaal draaien
-
-```powershell
-npm run dev
-```
-
-Controleer daarna:
-
-```powershell
-Invoke-RestMethod http://localhost:8787/health
-```
-
-Controleer MCP tool discovery:
-
-```powershell
-$headers = @{
-  'Content-Type' = 'application/json'
-  Accept = 'application/json, text/event-stream'
-}
-
-$body = @{ jsonrpc = '2.0'; id = 1; method = 'tools/list' } | ConvertTo-Json -Depth 8
-Invoke-RestMethod -Method Post -Uri 'http://localhost:8787/mcp' -Headers $headers -Body $body
-```
-
-## Deployen
-
-```powershell
-npm run deploy
-```
-
-Na deployment gebruik je de publieke Worker-URL als remote MCP endpoint:
-
-```text
-https://<worker-url>/mcp
-```
-
-Voer na deployment de MCP-smoke-test uit:
-
-```powershell
-npm run smoke:mcp -- -WorkerUrl 'https://<worker-url>' -StationCode ASD
-```
-
-De smoke-test controleert `/health`, MCP `initialize`, `ping`, `tools/list` en een `resolve_station`-call. Gebruik optioneel `-CheckRateLimit` om de rate-limitgrens te controleren. Dit verstuurt extra requests en is daarom alleen geschikt voor een gecontroleerde omgeving.
-
-## Productiechecklist
-
-- Controleer dat `LOG_LEVEL` op `info` of lager staat.
-- Controleer dat API-keys niet in logs of responses voorkomen.
-- Monitor MCP tool-call volume, rate-limit hits en NS API-fouten.
-- Publiceer privacy- en supportinformatie voordat je de MCP-server via ChatGPT breder aanbiedt.
-- Controleer merkgebruik voordat NS-naam, logo of officiële positionering gebruikt wordt.
+A successful local build or dry-run does not establish production connectivity.
+Record local checks, deployment results, and host observations separately.

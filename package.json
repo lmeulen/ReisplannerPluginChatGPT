@@ -1,31 +1,43 @@
 {
-  "name": "nederlandse-treinreisplanner-worker",
-  "version": "1.2.0",
+  "name": "ns-reisplanner-mvp",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MCP-server die reizen plant en reisinformatie geeft van NS",
+  "description": "Three read-only NS travel workflows for ChatGPT.",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "validate": "npm run typecheck && npm test",
-    "smoke:mcp": "powershell -ExecutionPolicy Bypass -File scripts/smoke-mcp.ps1",
-    "mcp:inspect": "npx @modelcontextprotocol/inspector"
+    "types:generate": "wrangler types src/worker-bindings.d.ts --env-interface WorkerBindings --include-runtime false --strict-vars false",
+    "types:check": "npm run types:generate -- --check",
+    "check:plugin": "node scripts/check-plugin.mjs",
+    "validate": "npm run typecheck && npm test && npm run check:plugin",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "package:plugin": "node scripts/package-plugin.mjs",
+    "deploy:dry-run": "wrangler deploy --dry-run --outdir dist/worker",
+    "mcp:inspect": "npx @modelcontextprotocol/inspector",
+    "test:worker": "npm run deploy:dry-run && node test/worker-runtime.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "hono": "^4.6.18",
-    "zod": "^3.24.1"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "hono": "4.13.14",
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260908.1",
-    "typescript": "^5.7.3",
-    "vitest": "^5.0.0",
-    "wrangler": "^4.130.0"
+    "@cloudflare/workers-types": "5.20261026.1",
+    "@types/node": "22.20.5",
+    "miniflare": "5.20261019.2-beta",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "wrangler": "4.152.0",
+    "yaml": "2.9.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   },
   "overrides": {
-    "sharp": "^0.35.4"
+    "undici": "^7.30.1"
   }
 }

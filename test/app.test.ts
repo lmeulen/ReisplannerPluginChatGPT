@@ -1,816 +1,95 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/server';
 import type { Env } from '../src/types';
 
-const env: Env = {
-  NS_API_KEY: 'ns-test-key',
-  NS_API_BASE_URL: 'https://ns.example.test/api',
-  RESPONSE_MODE: 'strict',
-  LOG_LEVEL: 'error'
-};
+const limiter = { idFromName: vi.fn(), newUniqueId: vi.fn(), idFromString: vi.fn(), getByName: vi.fn(), jurisdiction: vi.fn(), get: vi.fn().mockReturnValue({ fetch: async () => Response.json({ allowed: true }) }) };
+const env: Env = { NS_API_KEY: 'test-secret', NS_API_BASE_URL: 'https://ns.test/api', LOG_LEVEL: 'error', MCP_RATE_LIMITER: limiter };
+const stations = [{ code: 'GD', namen: { lang: 'Gouda' } }];
+function request(method: string, params?: object, id: string | number = 1) {
+  return { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) };
+}
+async function rpc(method: string, params?: object, bindings = env) {
+  const response = await createApp().request('/mcp', request(method, params), bindings);
+  const text = await response.text();
+  const json = JSON.parse(text.startsWith('event:') ? text.split('\n').find(line => line.startsWith('data: '))!.slice(6) : text);
+  return { response, json };
+}
+afterEach(() => vi.restoreAllMocks());
 
-describe('Nederlandse Treinreisplanner MCP Worker', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
+describe('text-only MVP MCP endpoint', () => {
+  it('publishes liveness without claiming upstream health', async () => {
+    const response = await createApp().request('/health', {}, {});
+    expect(await response.json()).toMatchObject({ status: 'ok', service: 'ns-reisplanner-mvp', scope: 'liveness' });
   });
-
-  it('returns a public MCP health response', async () => {
-    const response = await createApp().request('/health', {}, env);
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ status: 'ok', service: 'nederlandse-treinreisplanner-mcp' });
+  it('initializes without credentials and advertises no UI resources', async () => {
+    const { json } = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } }, {});
+    expect(json.result.serverInfo).toEqual({ name: 'ns-reisplanner-mvp', version: '0.1.0' });
+    expect(json.result.capabilities.resources).toBeUndefined();
+    expect(json.result.instructions).toContain('arrival');
   });
-
-  it('publishes clean server instructions during MCP initialization', async () => {
-    const response = await createApp().request(
-      '/mcp',
-      mcpRequest({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test-client', version: '1.0.0' } }
-      },
-      { 'MCP-Protocol-Version': '2025-06-18' }),
-      env
-    );
-
-    expect(response.status).toBe(200);
-    const result = await readMcpResponse(response);
-    expect(result.result.instructions).toContain('Verzin nooit tijden');
-    expect(result.result.instructions).not.toContain("' + '");
-    expect(result.result.instructions).not.toContain(' + ');
+  it('exposes exactly three distinct, read-only schema-validated tools without a secret', async () => {
+    const { json } = await rpc('tools/list', {}, {});
+    expect(json.result.tools.map((tool: { name: string }) => tool.name)).toEqual(['plan_journey', 'get_departures', 'get_disruptions']);
+    for (const tool of json.result.tools) {
+      expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: true });
+      expect(tool.inputSchema.additionalProperties).toBe(false);
+      expect(tool.outputSchema.type).toBe('object');
+      expect(tool._meta).toBeUndefined();
+    }
   });
-
-  it('responds to MCP ping requests', async () => {
-    const response = await createApp().request('/mcp', mcpRequest({ jsonrpc: '2.0', id: 2, method: 'ping' }), env);
-
-    expect(response.status).toBe(200);
-    await expect(readMcpResponse(response)).resolves.toMatchObject({ jsonrpc: '2.0', id: 2, result: {} });
+  it('rejects missing inputs and offset-free time before upstream I/O', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+    for (const args of [{ to: 'Gouda' }, { from: 'GD', to: 'GD', dateTime: '2026-10-26T09:00:00' }, { from: 'GD', to: 'GD', searchForArrival: true }]) {
+      const { json } = await rpc('tools/call', { name: 'plan_journey', arguments: args });
+      expect(json.result?.isError ?? Boolean(json.error)).toBe(true);
+    }
+    expect(fetcher).not.toHaveBeenCalled();
   });
-
-  it('negotiates an unsupported initialization protocol version', async () => {
-    const response = await createApp().request(
-      '/mcp',
-      mcpRequest(
-        {
-          jsonrpc: '2.0',
-          id: 3,
-          method: 'initialize',
-          params: { protocolVersion: '1999-01-01', capabilities: {}, clientInfo: { name: 'test-client', version: '1.0.0' } }
-        },
-        { 'MCP-Protocol-Version': '1999-01-01' }
-      ),
-      env
-    );
-
-    expect(response.status).toBe(200);
-    const result = await readMcpResponse(response);
-    expect(result).toMatchObject({ jsonrpc: '2.0', id: 3, result: { protocolVersion: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) } });
-    expect(result.result.protocolVersion).not.toBe('1999-01-01');
+  it('reports missing NS configuration safely', async () => {
+    const { json } = await rpc('tools/call', { name: 'get_disruptions', arguments: {} }, { ...env, NS_API_KEY: undefined });
+    expect(json.result.isError).toBe(true);
+    expect(JSON.stringify(json)).toContain('not configured');
+    expect(JSON.stringify(json)).not.toContain('test-secret');
   });
-
-  it('does not expose legacy REST endpoints', async () => {
-    const response = await createApp().request('/stations/search?query=Amsterdam', {}, env);
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toMatchObject({ code: 'not_found' });
-  });
-
-  it('lists only the public workflow toolset', async () => {
-    const response = await createApp().request('/mcp', mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }), env);
-
-    expect(response.status).toBe(200);
-    const result = await readMcpResponse(response);
-    expect(result.result.tools.map((tool: any) => tool.name)).toEqual([
-      'plan_resolved_journey',
-      'recommend_journey',
-      'get_resolved_station_departures',
-      'get_resolved_station_arrivals',
-      'get_resolved_station_disruptions',
-      'price_resolved_journey',
-      'get_planned_journey_details',
-      'check_route_disruptions',
-      'check_journey_status',
-      'check_journey_status_ref',
-      'find_departure_platform',
-      'check_planned_journey_warnings',
-      'resolve_station',
-      'find_nearest_station',
-      'get_train_stops'
-    ]);
-    expect(result.result.tools[0]).toMatchObject({
-      title: 'Plan resolved journey',
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      outputSchema: { properties: { fromStation: { type: 'object' }, toStation: { type: 'object' }, journeys: { type: 'array' } } }
+  it('performs one complete departures workflow using natural station input', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async resource => {
+      const url = String(resource);
+      return Response.json(url.includes('/stations') ? { payload: stations } : { payload: { departures: [{ direction: 'Rotterdam Centraal', product: { categoryName: 'Intercity' }, plannedDateTime: '2026-10-26T09:00:00+01:00', actualDateTime: '2026-10-26T09:05:00+01:00', plannedTrack: '3', actualTrack: '5', cancelled: false }] } });
     });
+    const { json } = await rpc('tools/call', { name: 'get_departures', arguments: { station: 'Gouda' } });
+    expect(json.result.isError).not.toBe(true);
+    expect(json.result.structuredContent).toMatchObject({ status: 'ok', station: { code: 'GD' }, departures: [{ actualPlatform: '5', plannedPlatform: '3' }] });
+    expect(json.result.content[0].text).toContain('Rotterdam Centraal');
   });
-
-  it('reports delay and platform changes from a ctxRecon reference', async () => {
-    mockNsResponse({
-      ctxRecon: 'ctx-status-1',
-      plannedDurationInMinutes: 30,
-      transfers: 0,
-      status: 'NORMAL',
-      legs: [
-        {
-          name: 'Intercity',
-          direction: 'Utrecht Centraal',
-          origin: {
-            name: 'Amsterdam Centraal',
-            plannedDateTime: '2026-09-11T08:24:00+02:00',
-            actualDateTime: '2026-09-11T08:29:00+02:00',
-            plannedTrack: '5',
-            actualTrack: '7'
-          },
-          destination: {
-            name: 'Utrecht Centraal',
-            plannedDateTime: '2026-09-11T08:54:00+02:00',
-            actualDateTime: '2026-09-11T08:59:00+02:00'
-          },
-          product: { categoryName: 'Intercity' }
-        }
-      ]
-    });
-
-    const response = await callMcpTool('check_journey_status_ref', { ctxRecon: 'ctx-status-1' }, 'status-1');
-
-    expect(response.status).toBe(200);
-    await expect(readMcpResponse(response)).resolves.toMatchObject({
-      id: 'status-1',
-      result: {
-        structuredContent: {
-          reference: { type: 'ctxRecon', value: 'ctx-status-1' },
-          status: 'delayed',
-          delayMinutes: 5,
-          platformChanged: true,
-          missedTransfer: false,
-          legs: [{ status: 'delayed', actualPlatform: '7', platformChanged: true }]
-        }
-      }
-    });
+  it('distinguishes a valid empty response from a malformed upstream response', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ payload: [] }));
+    expect((await rpc('tools/call', { name: 'get_disruptions', arguments: {} })).json.result.structuredContent.status).toBe('no_results');
+    fetcher.mockResolvedValue(Response.json({ message: 'provider schema changed' }));
+    const { json } = await rpc('tools/call', { name: 'get_disruptions', arguments: {} });
+    expect(json.result.isError).toBe(true);
+    expect(json.result.structuredContent).toBeUndefined();
   });
-
-  it('marks a short connection as at risk', async () => {
-    mockNsResponse({
-      ctxRecon: 'ctx-risk-1',
-      status: 'NORMAL',
-      legs: [
-        {
-          origin: { name: 'Amsterdam Centraal', plannedDateTime: '2026-09-11T08:24:00+02:00' },
-          destination: { name: 'Utrecht Centraal', plannedDateTime: '2026-09-11T08:51:00+02:00' },
-          product: { categoryName: 'Intercity' }
-        },
-        {
-          origin: { name: 'Utrecht Centraal', plannedDateTime: '2026-09-11T08:54:00+02:00' },
-          destination: { name: 'Eindhoven Centraal', plannedDateTime: '2026-09-11T09:35:00+02:00' },
-          product: { categoryName: 'Intercity' }
-        }
-      ]
+  it('keeps credentials scoped to concurrent requests', async () => {
+    const keys: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_resource, init) => {
+      keys.push(new Headers(init?.headers).get('Ocp-Apim-Subscription-Key') ?? '');
+      return Response.json([]);
     });
-
-    const response = await callMcpTool('check_journey_status_ref', { ctxRecon: 'ctx-risk-1' }, 'status-risk-1');
-
-    expect(response.status).toBe(200);
-    await expect(readMcpResponse(response)).resolves.toMatchObject({ result: { structuredContent: { status: 'at_risk' } } });
+    await Promise.all(['first', 'second'].map(key => rpc('tools/call', { name: 'get_disruptions', arguments: {} }, { ...env, NS_API_KEY: key })));
+    expect(keys.sort()).toEqual(['first', 'second']);
   });
-
-  it('recommends the fastest resolved journey and returns alternatives', async () => {
-    mockNsSequence([
-      { payload: [{ code: 'AAA', namen: { lang: 'Alpha Station' }, land: 'NL' }] },
-      { payload: [{ code: 'BBB', namen: { lang: 'Beta Station' }, land: 'NL' }] },
-      {
-        trips: [
-          { uid: 'fast', plannedDurationInMinutes: 35, transfers: 1, status: 'NORMAL', legs: [] },
-          { uid: 'slow', plannedDurationInMinutes: 50, transfers: 0, status: 'NORMAL', legs: [] }
-        ]
-      },
-      { payload: [] },
-      { payload: [] }
-    ]);
-
-    const response = await callMcpTool(
-      'recommend_journey',
-      { from: 'Alpha Station', to: 'Beta Station', priority: 'fastest', maxAlternatives: 1 },
-      'recommendation-1'
-    );
-
-    expect(response.status).toBe(200);
-    await expect(readMcpResponse(response)).resolves.toMatchObject({
-      id: 'recommendation-1',
-      result: {
-        structuredContent: {
-          recommendation: { id: 'fast', summary: { durationMinutes: 35 } },
-          alternatives: [{ journey: { id: 'slow', summary: { durationMinutes: 50 } } }],
-          disruptions: [],
-          warnings: []
-        }
-      }
-    });
+  it('honors durable rate limiting without contacting NS', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+    const blocked: Env = { ...env, MCP_RATE_LIMITER: { ...limiter, get: vi.fn().mockReturnValue({ fetch: async () => Response.json({ allowed: false, retryAfterSeconds: 17 }) }) } };
+    const { response, json } = await rpc('tools/call', { name: 'get_disruptions', arguments: {} }, blocked);
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('17');
+    expect(json.error.code).toBe(-32029);
+    expect(fetcher).not.toHaveBeenCalled();
   });
-
-  it('searches stations with enriched station fields', async () => {
-    mockNsResponse({
-      payload: [
-        {
-          code: 'ASD',
-          UICCode: '8400058',
-          namen: { lang: 'Amsterdam Centraal' },
-          land: 'NL',
-          stationType: 'knooppuntIntercitystation',
-          lat: 52.378887,
-          lng: 4.900277
-        }
-      ]
-    });
-
-    const response = await callMcpTool('search_stations', { query: 'Amsterdam', limit: 5, countryCodes: ['NL'] }, 'stations-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      id: 'stations-1',
-      result: {
-        structuredContent: {
-          stations: [{ code: 'ASD', name: 'Amsterdam Centraal', uicCode: '8400058', latitude: 52.378887, longitude: 4.900277 }]
-        }
-      }
-    });
-    expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ pathname: '/api/v2/stations' }), expect.any(Object));
-  });
-
-  it('uses fuzzy matching against the full station list when NS exact search returns no station', async () => {
-    let callCount = 0;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        callCount += 1;
-        if (callCount === 1) {
-          return Response.json({ payload: [] });
-        }
-
-        return Response.json({
-          payload: [
-            {
-              code: 'RAI',
-              UICCode: '8400561',
-              namen: { kort: 'Rai', middel: 'Amsterdam RAI', lang: 'Amsterdam RAI' },
-              land: 'NL',
-              stationType: 'stoptreinstation'
-            },
-            {
-              code: 'ASD',
-              UICCode: '8400058',
-              namen: { kort: 'Asd', middel: 'Amsterdam C.', lang: 'Amsterdam Centraal' },
-              land: 'NL',
-              stationType: 'knooppuntIntercitystation',
-              synoniemen: ['Amsterdam CS']
-            },
-            {
-              code: 'RTD',
-              UICCode: '8400530',
-              namen: { lang: 'Rotterdam Centraal' },
-              land: 'NL',
-              stationType: 'knooppuntIntercitystation'
-            }
-          ]
-        });
-      })
-    );
-
-    const response = await callMcpTool('search_stations', { query: 'Amsterdm', limit: 3 }, 'fuzzy-stations-1');
-
-    expect(response.status).toBe(200);
-    const mcpResponse = await readMcpResponse(response);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(mcpResponse.result.structuredContent.stations[0]).toMatchObject({ code: 'ASD', name: 'Amsterdam Centraal', matchType: 'fuzzy' });
-  });
-
-  it('returns enriched station info', async () => {
-    mockNsResponse({
-      payload: [
-        {
-          code: 'ASD',
-          UICCode: '8400058',
-          EVACode: '8400058',
-          namen: { kort: 'Asd', middel: 'Amsterdam C.', lang: 'Amsterdam Centraal' },
-          land: 'NL',
-          stationType: 'knooppuntIntercitystation',
-          lat: 52.378887,
-          lng: 4.900277,
-          heeftFaciliteiten: true,
-          heeftReisassistentie: true,
-          heeftVertrektijden: true,
-          sporen: [{ spoorNummer: '5' }],
-          synoniemen: ['Amsterdam CS']
-        }
-      ]
-    });
-
-    const response = await callMcpTool('get_station_info', { stationCode: 'ASD' }, 'station-info-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: {
-        structuredContent: {
-          station: {
-            code: 'ASD',
-            evaCode: '8400058',
-            tracks: ['5'],
-            synonyms: ['Amsterdam CS'],
-            hasFacilities: true,
-            hasTravelAssistance: true,
-            hasDepartures: true
-          }
-        }
-      }
-    });
-  });
-
-  it('embeds weather in station info without exposing a weather tool', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = new URL(input.toString());
-        if (url.hostname === 'api.open-meteo.com') {
-          return Response.json({
-            latitude: 52.1,
-            longitude: 5.1,
-            current: {
-              time: '2026-09-12T12:00',
-              temperature_2m: 18.4,
-              apparent_temperature: 17.8,
-              precipitation: 0.2,
-              weather_code: 2,
-              wind_speed_10m: 12,
-              wind_direction_10m: 240
-            },
-            hourly: { time: ['2026-09-12T12:00'], precipitation_probability: [35] }
-          });
-        }
-
-        return Response.json({
-          payload: [{ code: 'WTH', UICCode: '8400001', EVACode: '8400001', namen: { lang: 'Weather Station' }, land: 'NL', lat: 52.1, lng: 5.1 }]
-        });
-      })
-    );
-
-    const response = await callMcpTool('get_station_info', { stationCode: 'WTH' }, 'station-weather-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { station: { code: 'WTH', weather: { temperatureCelsius: 18.4, precipitationProbabilityPercent: 35, weatherCode: 2 } } } }
-    });
-  });
-
-  it('finds nearest stations from explicit coordinates', async () => {
-    mockNsResponse({ payload: [{ code: 'UT', UICCode: '8400621', namen: { lang: 'Utrecht Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation', distance: 850 }] });
-
-    const response = await callMcpTool('get_nearest_stations', { latitude: 52.0907, longitude: 5.1214, limit: 3 }, 'nearest-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { stations: [{ code: 'UT', name: 'Utrecht Centraal', distanceMeters: 850 }] } }
-    });
-  });
-
-  it('returns enriched station departures', async () => {
-    mockNsResponse({
-      payload: {
-        departures: [
-          {
-            name: 'Intercity',
-            direction: 'Utrecht Centraal',
-            plannedDateTime: '2026-09-11T08:24:00+02:00',
-            actualDateTime: '2026-09-11T08:26:00+02:00',
-            plannedTrack: '5',
-            actualTrack: '5',
-            product: { categoryName: 'Intercity', number: '3024', operatorName: 'NS', lineNumber: '3000', productType: 'TRAIN' },
-            departureStatus: 'INCOMING',
-            journeyDetailRef: 'journey-ref-1',
-            messages: [{ text: 'Let op gewijzigde vertrektijd.' }],
-            routeStations: [{ mediumName: 'Utrecht C.', uicCode: '8400621' }]
-          }
-        ]
-      }
-    });
-
-    const response = await callMcpTool('get_station_departures', { stationCode: 'ASD', maxResults: 5 }, 'departures-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: {
-        structuredContent: {
-          departures: [
-            {
-              journeyDetailRef: 'journey-ref-1',
-              messages: ['Let op gewijzigde vertrektijd.'],
-              routeStations: [{ name: 'Utrecht C.', uicCode: '8400621' }],
-              operatorName: 'NS',
-              lineNumber: '3000',
-              productType: 'TRAIN'
-            }
-          ]
-        }
-      }
-    });
-  });
-
-  it('returns enriched station arrivals', async () => {
-    mockNsResponse({
-      payload: {
-        arrivals: [
-          {
-            name: 'Sprinter',
-            origin: 'Rotterdam Centraal',
-            plannedDateTime: '2026-09-11T09:10:00+02:00',
-            actualDateTime: '2026-09-11T09:12:00+02:00',
-            plannedTrack: '7',
-            actualTrack: '8',
-            product: { categoryName: 'Sprinter', number: '5024', operatorName: 'NS', lineNumber: '5000', productType: 'TRAIN' },
-            arrivalStatus: 'ARRIVING',
-            journeyDetailRef: 'arrival-ref-1',
-            messages: [{ text: 'Komt binnen op spoor 8.' }]
-          }
-        ]
-      }
-    });
-
-    const response = await callMcpTool('get_station_arrivals', { uicCode: '8400621', maxResults: 5 }, 'arrivals-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { arrivals: [{ journeyDetailRef: 'arrival-ref-1', messages: ['Komt binnen op spoor 8.'], operatorName: 'NS' }] } }
-    });
-  });
-
-  it('plans journeys with route and detail references', async () => {
-    mockNsResponse({
-      trips: [
-        {
-          uid: 'trip-1',
-          ctxRecon: 'ctx-recon-plan-1',
-          routeId: 'route-1',
-          plannedDurationInMinutes: 27,
-          transfers: 0,
-          status: 'NORMAL',
-          legs: [
-            {
-              name: 'Intercity',
-              direction: 'Utrecht Centraal',
-              journeyDetailRef: 'journey-ref-1',
-              origin: { name: 'Amsterdam Centraal', plannedDateTime: '2026-09-11T08:24:00+02:00', actualTrack: '5' },
-              destination: { name: 'Utrecht Centraal', plannedDateTime: '2026-09-11T08:51:00+02:00' },
-              product: { categoryName: 'Intercity' }
-            }
-          ]
-        }
-      ]
-    });
-
-    const response = await callMcpTool('plan_journey', { from: 'ASD', to: 'UT', dateTime: '2026-09-11T08:30:00+02:00', localTrainsOnly: false }, 'journey-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: {
-        structuredContent: {
-          journeys: [{ id: 'ctx-recon-plan-1', ctxRecon: 'ctx-recon-plan-1', routeId: 'route-1', legs: [{ journeyDetailRef: 'journey-ref-1' }] }]
-        }
-      }
-    });
-  });
-
-  it('reconstructs a single trip from ctxRecon', async () => {
-    mockNsResponse({ ctxRecon: 'ctx-single-1', routeId: 'route-1', plannedDurationInMinutes: 27, transfers: 0, status: 'NORMAL', legs: [] });
-
-    const response = await callMcpTool('get_single_trip', { ctxRecon: 'ctx-single-1' }, 'single-trip-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { journeys: [{ id: 'ctx-single-1', ctxRecon: 'ctx-single-1', routeId: 'route-1' }] } }
-    });
-  });
-
-  it('gets train journey details from journeyDetailRef', async () => {
-    mockNsResponse({
-      payload: {
-        source: 'HARP',
-        productNumbers: ['3024'],
-        allowCrowdReporting: true,
-        notes: [{ value: 'Rijdt volgens planning.' }],
-        stops: [
-          {
-            id: 'stop-1',
-            kind: 'DEPARTURE',
-            stop: { namen: { lang: 'Amsterdam Centraal' } },
-            departures: [{ plannedTime: '2026-09-11T08:24:00+02:00', actualTime: '2026-09-11T08:26:00+02:00', plannedTrack: '5', actualTrack: '5', cancelled: false }],
-            arrivals: []
-          }
-        ]
-      }
-    });
-
-    const response = await callMcpTool('get_journey_details', { journeyDetailRef: 'journey-ref-1' }, 'journey-details-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { journeyDetails: { source: 'HARP', productNumbers: ['3024'], stops: [{ name: 'Amsterdam Centraal', actualDeparture: '2026-09-11T08:26:00+02:00' }] } } }
-    });
-  });
-
-  it('gets domestic price information', async () => {
-    mockNsResponse({ payload: { totalPriceInCents: 1234, travelClass: 'SECOND_CLASS', travelDiscount: 'NO_DISCOUNT', travelProducts: ['OVCHIPKAART_ENKELE_REIS'], operatorName: 'NS' } });
-
-    const response = await callMcpTool('get_domestic_price', { fromStation: 'ASD', toStation: 'UT' }, 'price-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { content: [{ text: expect.stringContaining('EUR 12.34') }], structuredContent: { price: { totalPriceInCents: 1234, totalPrice: 'EUR 12.34' } } }
-    });
-  });
-
-  it('gets general disruptions with filters', async () => {
-    mockNsResponse([{ id: 'd1', title: 'Minder treinen', type: 'CALAMITY', topic: 'landelijk', isActive: true }]);
-
-    const response = await callMcpTool('get_disruptions', { types: ['CALAMITY'], isActive: true }, 'disruptions-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { disruptions: [{ id: 'd1', title: 'Minder treinen', type: 'CALAMITY', topic: 'landelijk', isActive: true }] } }
-    });
-  });
-
-  it('gets station disruptions', async () => {
-    mockNsResponse([{ id: 's1', title: 'Werkzaamheden rond Amsterdam', type: 'MAINTENANCE', topic: 'station', isActive: true }]);
-
-    const response = await callMcpTool('get_station_disruptions', { stationCode: 'ASD' }, 'station-disruptions-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { disruptions: [{ id: 's1', title: 'Werkzaamheden rond Amsterdam' }] } }
-    });
-  });
-
-  it('gets a single disruption', async () => {
-    mockNsResponse({ id: 'd1', title: 'Minder treinen', type: 'CALAMITY', topic: 'landelijk', isActive: true });
-
-    const response = await callMcpTool('get_single_disruption', { type: 'CALAMITY', id: 'd1' }, 'single-disruption-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { disruption: { id: 'd1', title: 'Minder treinen', isActive: true } } }
-    });
-  });
-
-  it('plans a resolved journey with station names in one tool call', async () => {
-    mockNsSequence([
-      { payload: [{ code: 'ASD', namen: { lang: 'Amsterdam Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation' }] },
-      { payload: [{ code: 'UT', namen: { lang: 'Utrecht Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation' }] },
-      { trips: [mockTrip()] }
-    ]);
-
-    const response = await callMcpTool('plan_resolved_journey', { from: 'Amsterdm', to: 'Utrect' }, 'resolved-journey-1');
-
-    expect(response.status).toBe(200);
-    const result = await readMcpResponse(response);
-    expect(result).toMatchObject({
-      result: {
-        structuredContent: {
-          fromStation: { station: { code: 'ASD' } },
-          toStation: { station: { code: 'UT' } },
-          journeys: [{ ctxRecon: 'ctx-recon-plan-1' }]
-        }
-      }
-    });
-    expect(result.result.content[0].text).toContain('TREINREIS');
-    expect(result.result.content[0].text).toContain('Amsterdam Centraal ->');
-  });
-
-  it('gets resolved departures with a station name in one tool call', async () => {
-    mockNsSequence([
-      { payload: [{ code: 'ASD', namen: { lang: 'Amsterdam Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation' }] },
-      { payload: { departures: [{ name: 'Intercity', direction: 'Utrecht Centraal', plannedTrack: '5', product: { categoryName: 'Intercity' }, departureStatus: 'ON_STATION' }] } }
-    ]);
-
-    const response = await callMcpTool('get_resolved_station_departures', { station: 'Amsterdam', maxResults: 3 }, 'resolved-departures-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { station: { station: { code: 'ASD' } }, departures: [{ direction: 'Utrecht Centraal', plannedPlatform: '5' }] } }
-    });
-  });
-
-  it('prices a resolved journey in one tool call', async () => {
-    mockNsSequence([
-      { payload: [{ code: 'ASD', namen: { lang: 'Amsterdam Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation' }] },
-      { payload: [{ code: 'UT', namen: { lang: 'Utrecht Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation' }] },
-      { trips: [mockTrip()] },
-      { payload: { totalPriceInCents: 1000, travelClass: 'SECOND_CLASS', travelDiscount: 'NO_DISCOUNT', travelProducts: ['OVCHIPKAART_ENKELE_REIS'], operatorName: 'NS' } }
-    ]);
-
-    const response = await callMcpTool('price_resolved_journey', { from: 'Amsterdam', to: 'Utrecht' }, 'resolved-price-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { price: { totalPrice: 'EUR 10.00' }, journeys: [{ routeId: 'route-1' }] } }
-    });
-  });
-
-  it('finds a departure platform with station names in one tool call', async () => {
-    mockNsSequence([
-      { payload: [{ code: 'ALM', namen: { lang: 'Almere Centrum' }, land: 'NL', stationType: 'intercitystation' }] },
-      { payload: [{ code: 'LLS', UICCode: '8400390', namen: { lang: 'Lelystad Centrum' }, land: 'NL', stationType: 'intercitystation' }] },
-      { payload: { departures: [{ name: 'Intercity', direction: 'Lelystad Centrum', plannedTrack: '5', actualTrack: '6', product: { categoryName: 'Intercity' }, routeStations: [{ mediumName: 'Lelystad C.', uicCode: '8400390' }] }] } }
-    ]);
-
-    const response = await callMcpTool('find_departure_platform', { station: 'Almere', destination: 'Lelystad' }, 'platform-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { station: { station: { code: 'ALM' } }, destinationStation: { station: { code: 'LLS' } }, departures: [{ actualPlatform: '6' }] } }
-    });
-  });
-
-  it('resolves a station as a standalone workflow tool', async () => {
-    mockNsResponse({ payload: [{ code: 'ASD', UICCode: '8400058', namen: { lang: 'Amsterdam Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation' }] });
-
-    const response = await callMcpTool('resolve_station', { station: 'Amsterdm' }, 'resolve-station-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { station: { input: 'Amsterdm', station: { code: 'ASD', name: 'Amsterdam Centraal' } } } }
-    });
-  });
-
-  it('finds the nearest station as a standalone workflow tool', async () => {
-    mockNsResponse({ payload: [{ code: 'UT', UICCode: '8400621', namen: { lang: 'Utrecht Centraal' }, land: 'NL', stationType: 'knooppuntIntercitystation', distance: 850 }] });
-
-    const response = await callMcpTool('find_nearest_station', { latitude: 52.0907, longitude: 5.1214, limit: 3 }, 'nearest-station-workflow-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { station: { code: 'UT', name: 'Utrecht Centraal' }, stations: [{ code: 'UT', distanceMeters: 850 }] } }
-    });
-  });
-
-  it('gets train stops from a journey detail reference as a workflow tool', async () => {
-    mockNsResponse(mockJourneyDetailsPayload());
-
-    const response = await callMcpTool('get_train_stops', { journeyDetailRef: 'journey-ref-1' }, 'train-stops-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { journeyDetails: { stops: [{ name: 'Amsterdam Centraal', actualDeparture: '2026-09-11T08:26:00+02:00' }] } } }
-    });
-  });
-
-  it('embeds weather in detailed journey stops', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = new URL(input.toString());
-        if (url.hostname === 'api.open-meteo.com') {
-          return Response.json({
-            latitude: 52.2,
-            longitude: 5.2,
-            current: { time: '2026-09-12T12:00', temperature_2m: 19, weather_code: 1 },
-            hourly: { time: ['2026-09-12T12:00'], precipitation_probability: [10] }
-          });
-        }
-
-        if (url.pathname.endsWith('/v2/journey')) {
-          return Response.json({
-            payload: {
-              source: 'HARP',
-              productNumbers: ['9999'],
-              stops: [{ id: 'weather-stop', kind: 'DEPARTURE', stop: { namen: { lang: 'Weather Test Station' } }, departures: [] }]
-            }
-          });
-        }
-
-        return Response.json({ payload: [{ code: 'WTS', namen: { lang: 'Weather Test Station' }, land: 'NL', lat: 52.2, lng: 5.2 }] });
-      })
-    );
-
-    const response = await callMcpTool('get_train_stops', { journeyDetailRef: 'weather-journey-ref' }, 'journey-weather-1');
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({
-      result: { structuredContent: { journeyDetails: { stops: [{ name: 'Weather Test Station', weather: { temperatureCelsius: 19, weatherCode: 1 } }] } } }
-    });
-  });
-
-  it('caches MCP station searches to reduce upstream NS API calls', async () => {
-    mockNsResponse({ payload: [{ code: 'GN', namen: { lang: 'Groningen' }, land: 'NL' }] });
-
-    const firstResponse = await callMcpTool('search_stations', { query: 'Groningen' }, 'cached-stations-1');
-    const secondResponse = await callMcpTool('search_stations', { query: 'Groningen' }, 'cached-stations-2');
-
-    expect(firstResponse.status).toBe(200);
-    expect(secondResponse.status).toBe(200);
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('returns MCP validation errors as tool errors', async () => {
-    const response = await callMcpTool('get_journey_details', {}, 2);
-
-    expect(response.status).toBe(200);
-    expect(await readMcpResponse(response)).toMatchObject({ jsonrpc: '2.0', id: 2, result: { isError: true, content: [{ type: 'text' }] } });
-  });
-
-  it('rate limits public MCP tool calls per client', async () => {
-    mockNsResponse({ payload: [{ code: 'RTD', namen: { lang: 'Rotterdam Centraal' }, land: 'NL' }] });
-
-    const limitedEnv = { ...env, MCP_RATE_LIMIT_PER_MINUTE: '1' };
-    const request = buildMcpToolRequest('search_stations', { query: 'Rotterdam' }, 'limited-stations', { 'CF-Connecting-IP': '203.0.113.42' });
-
-    const firstResponse = await createApp({ exposeApiNearTools: true }).request('/mcp', request, limitedEnv);
-    const secondResponse = await createApp({ exposeApiNearTools: true }).request('/mcp', request, limitedEnv);
-
-    expect(firstResponse.status).toBe(200);
-    expect(secondResponse.status).toBe(429);
-    expect(secondResponse.headers.get('Retry-After')).toBeTruthy();
-    await expect(secondResponse.json()).resolves.toMatchObject({ jsonrpc: '2.0', id: 'limited-stations', error: { code: -32029 } });
+  it('rejects oversized requests and retains only health/MCP routes', async () => {
+    const app = createApp();
+    expect((await app.request('/mcp', request('tools/call', { large: 'x'.repeat(20_000) }), env)).status).toBe(413);
+    expect((await app.request('/stations/search')).status).toBe(404);
   });
 });
-
-function callMcpTool(name: string, argumentsInput: Record<string, unknown>, id: string | number): Promise<Response> {
-  return createApp({ exposeApiNearTools: true }).request('/mcp', buildMcpToolRequest(name, argumentsInput, id), env) as Promise<Response>;
-}
-
-function buildMcpToolRequest(name: string, argumentsInput: Record<string, unknown>, id: string | number, extraHeaders?: Record<string, string>) {
-  return mcpRequest({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: argumentsInput } }, extraHeaders);
-}
-
-function mcpRequest(body: unknown, extraHeaders?: Record<string, string>) {
-  return { method: 'POST', headers: { ...mcpHeaders(), ...extraHeaders }, body: JSON.stringify(body) };
-}
-
-function mcpHeaders() {
-  return { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
-}
-
-async function readMcpResponse(response: Response): Promise<any> {
-  const contentType = response.headers.get('Content-Type') ?? '';
-  if (!contentType.includes('text/event-stream')) return response.json();
-
-  const text = await response.text();
-  const dataLine = text
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('data:'));
-
-  if (!dataLine) throw new Error(`MCP SSE response did not contain a data line: ${text}`);
-  return JSON.parse(dataLine.slice('data:'.length).trim());
-}
-
-function mockNsResponse(payload: unknown): void {
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json(payload)));
-}
-
-function mockNsSequence(payloads: unknown[]): void {
-  let index = 0;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => Response.json(payloads[Math.min(index++, payloads.length - 1)]))
-  );
-}
-
-function mockTrip() {
-  return {
-    uid: 'trip-1',
-    ctxRecon: 'ctx-recon-plan-1',
-    routeId: 'route-1',
-    plannedDurationInMinutes: 27,
-    transfers: 0,
-    status: 'NORMAL',
-    legs: [
-      {
-        name: 'Intercity',
-        direction: 'Utrecht Centraal',
-        journeyDetailRef: 'journey-ref-1',
-        origin: { name: 'Amsterdam Centraal', plannedDateTime: '2026-09-11T08:24:00+02:00', actualTrack: '5' },
-        destination: { name: 'Utrecht Centraal', plannedDateTime: '2026-09-11T08:51:00+02:00' },
-        product: { categoryName: 'Intercity' }
-      }
-    ]
-  };
-}
-
-function mockJourneyDetailsPayload() {
-  return {
-    payload: {
-      source: 'HARP',
-      productNumbers: ['3024'],
-      allowCrowdReporting: true,
-      stops: [
-        {
-          id: 'stop-1',
-          kind: 'DEPARTURE',
-          stop: { namen: { lang: 'Amsterdam Centraal' } },
-          departures: [{ plannedTime: '2026-09-11T08:24:00+02:00', actualTime: '2026-09-11T08:26:00+02:00', plannedTrack: '5', actualTrack: '5', cancelled: false }],
-          arrivals: []
-        }
-      ]
-    }
-  };
-}

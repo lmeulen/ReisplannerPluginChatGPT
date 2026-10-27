@@ -1,0 +1,5 @@
+interface:
+  display_name: NS Reisplanner
+  short_description: Plan Dutch train journeys and check current rail information.
+policy:
+  allow_implicit_invocation: true

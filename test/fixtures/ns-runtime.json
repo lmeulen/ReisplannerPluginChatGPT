@@ -1,0 +1,99 @@
+{
+  "stations": {
+    "payload": [
+      { "code": "GD", "namen": { "lang": "Gouda" } },
+      { "code": "UT", "namen": { "lang": "Utrecht Centraal" } }
+    ]
+  },
+  "trips": {
+    "trips": [
+      {
+        "uid": "fictional-journey-1",
+        "plannedDurationInMinutes": 45,
+        "transfers": 1,
+        "status": "NORMAL",
+        "primaryMessage": {
+          "message": { "text": "FICTIONAL replacement bus warning" }
+        },
+        "legs": [
+          {
+            "type": "TRAIN",
+            "product": { "type": "TRAIN", "categoryName": "Intercity" },
+            "origin": {
+              "name": "Gouda",
+              "plannedDateTime": "2000-01-01T17:00:00+0100",
+              "plannedTrack": "3"
+            },
+            "destination": {
+              "name": "Fixture transfer",
+              "plannedDateTime": "2000-01-01T17:20:00+0100",
+              "plannedTrack": "5"
+            },
+            "cancelled": false
+          },
+          {
+            "type": "WALK",
+            "product": { "type": "WALK", "categoryName": "Walk" },
+            "origin": {
+              "name": "Fixture transfer",
+              "plannedDateTime": "2000-01-01T17:20:00+0100"
+            },
+            "destination": {
+              "name": "Fixture bus stop",
+              "plannedDateTime": "2000-01-01T17:25:00+0100"
+            },
+            "cancelled": false
+          },
+          {
+            "type": "BUS",
+            "product": { "type": "BUS", "categoryName": "Bus" },
+            "origin": {
+              "name": "Fixture bus stop",
+              "plannedDateTime": "2000-01-01T17:25:00+0100"
+            },
+            "destination": {
+              "name": "Utrecht Centraal",
+              "plannedDateTime": "2000-01-01T17:45:00+0100",
+              "plannedTrack": "7"
+            },
+            "cancelled": false
+          }
+        ]
+      }
+    ]
+  },
+  "departures": {
+    "payload": {
+      "departures": [
+        {
+          "direction": "Utrecht Centraal",
+          "plannedDateTime": "2000-01-01T17:00:00+0100",
+          "actualDateTime": "2000-01-01T17:05:00+0100",
+          "plannedTrack": "3",
+          "actualTrack": "4",
+          "cancelled": false,
+          "product": { "categoryName": "Intercity" }
+        }
+      ]
+    }
+  },
+  "disruptions": {
+    "payload": [
+      {
+        "id": "fictional-work-1",
+        "title": "FICTIONAL planned track work",
+        "type": "MAINTENANCE",
+        "isActive": false,
+        "start": "2000-01-02T08:00:00+0100",
+        "end": "2000-01-02T10:00:00+0100",
+        "expectedDuration": { "endTime": "2000-01-02T10:00:00+0100" },
+        "timespans": [
+          {
+            "situation": { "label": "FICTIONAL planned work" },
+            "consequence": { "description": "FICTIONAL trains use another platform" }
+          }
+        ]
+      }
+    ]
+  }
+}

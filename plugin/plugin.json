@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ns-reisplanner-mvp",
+  "version": "0.1.0",
+  "description": "Plan Dutch train journeys, check current departures, and review rail disruptions.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "NS Reisplanner MVP",
+        "shortDescription": "Actuele treinreizen",
+        "longDescription": "A focused, text-only plugin for planning current Dutch train journeys, checking station departures, and reviewing national or station-scoped rail disruptions.",
+        "category": "Travel",
+        "capabilities": [],
+        "defaultPrompt": "Plan a Dutch train journey or check current departures and disruptions."
+      }
+    }
+  }
+}

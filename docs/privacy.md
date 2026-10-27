@@ -1,62 +1,19 @@
-# Privacyverklaring Nederlandse Treinreisplanner MCP
+# Data handling
 
-Deze MCP-server helpt gebruikers actuele Nederlandse treinreisinformatie op te halen via de NS Reisplanner API.
+The Worker sends the requested station codes, travel time, language and relevant
+planning flags to NS over HTTPS. The upstream subscription key is a server-side
+secret. It is not accepted as tool input or returned in responses.
 
-## Welke gegevens worden verwerkt
+The application stores no journey history or travel-response cache. Its Durable
+Object stores a request count and reset time for an IP-derived bucket. Requests
+without Cloudflare's client-IP header share a conservative bucket. This limit
+state is operational data, not a user account or travel history.
 
-De server verwerkt alleen gegevens die nodig zijn voor de aangevraagde reisplannerfunctie:
+Application logs record operation, outcome and duration. Debug logs add a random
+request ID, canonical route, HTTP method/status and duration. They omit raw
+requests, station queries, credentials and journey references. Cloudflare, NS
+and the chat host have independent infrastructure logs and retention policies;
+this source alone does not establish their complete retention behavior.
 
-- stationsnamen of stationcodes;
-- optioneel expliciet opgegeven coordinaten voor het zoeken van dichtstbijzijnde stations;
-- gewenste vertrek- of aankomsttijd;
-- reisvoorkeuren zoals extra overstaptijd of toegankelijk reizen;
-- technische requestgegevens die Cloudflare standaard beschikbaar stelt, zoals IP-adres en user-agent.
-
-De server vraagt niet om namen, e-mailadressen, betaalgegevens, wachtwoorden, API-keys of volledige chatgeschiedenis. Coordinaten worden alleen verwerkt wanneer ze expliciet aan `get_nearest_stations` worden meegegeven.
-
-## Waarvoor gegevens worden gebruikt
-
-Invoer wordt gebruikt om:
-
-- stations te zoeken;
-- dichtstbijzijnde stations bij expliciet opgegeven coordinaten te vinden;
-- treinreizen te plannen;
-- prijsinformatie op te halen;
-- verstoringen op te halen;
-- misbruik en overbelasting van het publieke MCP-endpoint te beperken;
-- technische fouten te onderzoeken.
-
-Reisplannerrequests worden doorgestuurd naar de NS Reisplanner API. Raadpleeg ook de voorwaarden en privacyinformatie van NS voor de verwerking door NS.
-
-Voor weerinformatie worden stationcoordinaten doorgestuurd naar de geconfigureerde weerprovider. De standaardprovider is Open-Meteo. Weer wordt alleen opgehaald als een station of halte over coordinaten beschikt; expliciete gebruikerslocaties voor `get_nearest_stations` worden niet automatisch voor weer gebruikt.
-
-## Logging
-
-De Worker logt technische gebeurtenissen zoals toolnaam, resultaatstatus en duur van de call. De server logt geen `NS_API_KEY`, volledige toolargumenten of volledige reisadviezen.
-
-Cloudflare kan daarnaast standaard platformlogs en beveiligingsgegevens verwerken voor hosting, beveiliging en misbruikpreventie.
-
-## Bewaartermijn
-
-De applicatie bewaart zelf geen permanente gebruikersprofielen of reisgeschiedenis. Tijdelijke caches worden gebruikt voor stationszoekopdrachten en verstoringen:
-
-- stationszoekopdrachten en stationsdetails: maximaal 24 uur per Worker isolate;
-- dichtstbijzijnde stations: maximaal 10 minuten per Worker isolate, keyed op afgeronde coordinaten;
-- stationborden, ritdetails en verstoringen: kort, meestal maximaal 60 seconden per Worker isolate;
-- weerinformatie: maximaal 10 minuten per Worker isolate op afgeronde coordinaten;
-- prijsinformatie: maximaal 1 uur per Worker isolate;
-- rate-limit tellers: maximaal circa 1 minuut in een Cloudflare Durable Object.
-
-Cloudflare platformlogs kunnen volgens de instellingen van het Cloudflare-account tijdelijk beschikbaar blijven.
-
-## Delen met derden
-
-Gegevens worden alleen gedeeld met partijen die nodig zijn om de dienst te leveren:
-
-- Cloudflare voor hosting, beveiliging en rate limiting;
-- NS Reisplanner API voor actuele treinreisinformatie;
-- de geconfigureerde weerprovider voor weerinformatie op stationcoordinaten.
-
-## Contact
-
-Gebruik [docs/support.md](support.md) voor supportvragen, foutmeldingen of verzoeken over gegevensverwerking.
+The plugin is read-only and does not book or reserve anything. Results are
+snapshots, and failures or empty lists do not establish that no service exists.

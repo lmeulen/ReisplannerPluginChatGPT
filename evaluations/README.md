@@ -1,0 +1,7 @@
+# Routing evaluation
+
+`cases.json` contains 22 prompts: 16 positive and 6 negative. Each positive case has an untagged run for automatic selection and a tagged run as the explicit-selection control; negative controls run untagged and must produce no NS tool call. This is 38 runs per repetition, or 190 runs for the five repetitions below. Relative dates such as “tomorrow” and the next Dutch clock change keep time cases reusable; interpret Dutch local times with the offset valid for that date.
+
+Missing origin, destination, or departure-station cases should ask a concise follow-up without calling a tool or inferring the user's location. Ambiguous city stations should invoke the journey workflow and ask the user to choose from returned candidates. For daylight-saving overlap or gap cases, ask for clarification before calling a tool. The optional `manualChecks` on each case describe argument and response details to verify by inspecting the observed calls and final response; the source checker does not evaluate these checks.
+
+Run each case five times in the connected ChatGPT host. Start a fresh conversation for each repetition. Record the host and plugin versions, timestamp, actual tool calls and arguments, any clarification, and the final response in a copy of `results.template.json`. Keep observations pending until the live run is complete. Do not mark a case successful from the prompt text, a schema check, or deterministic local tests. Report counts and observed failures; do not claim a routing reliability rate without the live observations.
